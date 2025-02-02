@@ -96,8 +96,7 @@ if selected_statuses:
 
 # Filter out finished tasks if user does not want to show them
 if not show_finished:
-    # Remove rows where the status (converted to lowercase and stripped) equals "finished"
-    df_filtered = df_filtered[~df_filtered["Status"].str.strip().str.lower().eq("finished")]
+    df_filtered = df_filtered[~df_filtered["Status"].astype(str).str.strip().str.lower().eq("finished")]
 
 # Apply date filtering (only include tasks within the selected date range)
 if len(selected_date_range) == 2:
@@ -115,8 +114,8 @@ def group_status(status_series):
     Return "Finished" if all non-null statuses are finished,
     otherwise return "In Progress".
     """
-    # Lowercase and strip all statuses to standardize
-    statuses = status_series.dropna().str.strip().str.lower()
+    # Convert values to string, drop NA, then standardize
+    statuses = status_series.dropna().astype(str).str.strip().str.lower()
     return "Finished" if len(statuses) > 0 and all(s == "finished" for s in statuses) else "In Progress"
 
 # -----------------------------------------------
@@ -170,7 +169,7 @@ if not df_filtered.empty:
             x_start="Start Date",
             x_end="End Date",
             y="Activity",
-            color="Status Color",  # use our custom color column
+            color="Status Color",  # using the custom color column
             hover_data=["Items", "Tasks"],
             title="Activity Timeline Gantt Chart",
         )
@@ -190,7 +189,7 @@ if "Status" in edited_df.columns and edited_df["Status"].notna().any():
     progress_counts.columns = ["Status", "Count"]
     
     total_tasks = edited_df.shape[0]
-    finished_tasks = edited_df[edited_df["Status"].str.strip().str.lower() == "finished"].shape[0]
+    finished_tasks = edited_df[edited_df["Status"].astype(str).str.strip().str.lower() == "finished"].shape[0]
     completion_percentage = (finished_tasks / total_tasks) * 100 if total_tasks > 0 else 0
     
     st.metric("Overall Completion", f"{completion_percentage:.1f}%")
