@@ -51,7 +51,7 @@ selected_activities = st.sidebar.multiselect("Select Activity", options=activiti
 rooms = sorted(edited_df["Room"].dropna().unique())
 selected_rooms = st.sidebar.multiselect("Select Room", options=rooms, default=rooms)
 
-# Filter by Status (if available, else show a default option)
+# Filter by Status (if available)
 if edited_df["Status"].notna().sum() > 0:
     statuses = sorted(edited_df["Status"].dropna().unique())
     selected_statuses = st.sidebar.multiselect("Select Status", options=statuses, default=statuses)
@@ -75,7 +75,7 @@ if selected_rooms:
 if selected_statuses:
     df_filtered = df_filtered[df_filtered["Status"].isin(selected_statuses)]
 
-# Apply date filtering (ensure both Start and End dates are within the selected range)
+# Apply date filtering (ensuring the tasks fall within the selected range)
 if len(selected_date_range) == 2:
     start_range, end_range = pd.to_datetime(selected_date_range[0]), pd.to_datetime(selected_date_range[1])
     df_filtered = df_filtered[
@@ -83,22 +83,31 @@ if len(selected_date_range) == 2:
     ]
 
 # -----------------------------------------------
-# 5. Detailed Interactive Gantt Chart using Plotly
+# 5. Detailed Interactive Gantt Chart for Activities using Plotly
 # -----------------------------------------------
-st.subheader("Gantt Chart Visualization")
+st.subheader("Gantt Chart Visualization (by Activity)")
 if not df_filtered.empty:
+    # Aggregate data by Activity: get the earliest start date and latest end date
+    agg_df = df_filtered.groupby("Activity").agg({
+        "Start Date": "min",
+        "End Date": "max",
+        "Task": "count"  # Count number of tasks per activity as extra info
+    }).reset_index()
+    agg_df.rename(columns={"Task": "Task Count"}, inplace=True)
+
+    # Create the timeline chart using Activity as the y-axis
     gantt_fig = px.timeline(
-        df_filtered,
+        agg_df,
         x_start="Start Date",
         x_end="End Date",
-        y="Task",
+        y="Activity",
         color="Activity",
-        hover_data=["Room", "Location", "Notes", "Workdays"],
-        title="Construction Timeline Gantt Chart",
+        hover_data=["Task Count"],
+        title="Activity Timeline Gantt Chart",
     )
-    # Reverse y-axis to show tasks in natural top-to-bottom order
+    # Reverse y-axis to display activities in a natural order
     gantt_fig.update_yaxes(autorange="reversed")
-    gantt_fig.update_layout(xaxis_title="Timeline", yaxis_title="Tasks")
+    gantt_fig.update_layout(xaxis_title="Timeline", yaxis_title="Activity")
     st.plotly_chart(gantt_fig, use_container_width=True)
 else:
     st.info("No data available for the selected filters. Please adjust your filter options.")
