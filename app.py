@@ -27,7 +27,7 @@ def load_data(file_path):
     df["End Date"] = pd.to_datetime(df["End Date"], errors="coerce")
     return df
 
-# Load dataset automatically (the file should be in the same directory)
+# Load dataset automatically
 data_file = "construction_timeline.xlsx"
 df = load_data(data_file)
 
@@ -35,7 +35,7 @@ df = load_data(data_file)
 # 2. Data Editing Option
 # -----------------------------------------------
 st.subheader("Edit Dataset")
-# Allowing inline editing of the dataset
+# Inline editing of the dataset
 edited_df = st.data_editor(df, use_container_width=True)
 
 # -----------------------------------------------
@@ -43,22 +43,26 @@ edited_df = st.data_editor(df, use_container_width=True)
 # -----------------------------------------------
 st.sidebar.header("Filter Options")
 
-# Filter by Activity: using a multiselect drop-down pre-selecting all activities by default.
+# For Activity and Room, use dropdown-style multiselects that start with no selection.
+# In our filtering logic, an empty selection means "show all".
 activities = sorted(edited_df["Activity"].dropna().unique())
 selected_activities = st.sidebar.multiselect(
-    "Select Activity",
+    "Select Activity (leave empty for all)",
     options=activities,
-    default=activities  # all activities are selected by default
+    default=[]  # default empty, which we'll treat as "all"
 )
 
-# Filter by Room
 rooms = sorted(edited_df["Room"].dropna().unique())
-selected_rooms = st.sidebar.multiselect("Select Room", options=rooms, default=rooms)
+selected_rooms = st.sidebar.multiselect(
+    "Select Room (leave empty for all)",
+    options=rooms,
+    default=[]
+)
 
 # Filter by Status (if available)
 if edited_df["Status"].notna().sum() > 0:
     statuses = sorted(edited_df["Status"].dropna().unique())
-    selected_statuses = st.sidebar.multiselect("Select Status", options=statuses, default=statuses)
+    selected_statuses = st.sidebar.multiselect("Select Status (leave empty for all)", options=statuses, default=[])
 else:
     selected_statuses = []
 
@@ -72,14 +76,19 @@ selected_date_range = st.sidebar.date_input("Select Date Range", value=[min_date
 # -----------------------------------------------
 df_filtered = edited_df.copy()
 
+# Only filter by Activity if one or more are selected, otherwise show all.
 if selected_activities:
     df_filtered = df_filtered[df_filtered["Activity"].isin(selected_activities)]
+
+# Only filter by Room if one or more are selected, otherwise show all.
 if selected_rooms:
     df_filtered = df_filtered[df_filtered["Room"].isin(selected_rooms)]
+
+# Only filter by Status if one or more are selected, otherwise show all.
 if selected_statuses:
     df_filtered = df_filtered[df_filtered["Status"].isin(selected_statuses)]
 
-# Apply date filtering: ensure the tasks fall within the selected date range
+# Apply date filtering: show tasks that fall within the selected date range.
 if len(selected_date_range) == 2:
     start_range, end_range = pd.to_datetime(selected_date_range[0]), pd.to_datetime(selected_date_range[1])
     df_filtered = df_filtered[
@@ -91,15 +100,15 @@ if len(selected_date_range) == 2:
 # -----------------------------------------------
 st.subheader("Gantt Chart Visualization (by Activity)")
 if not df_filtered.empty:
-    # Aggregate data by Activity: find earliest Start Date and latest End Date for each activity.
+    # Aggregate data by Activity: get the earliest Start Date and latest End Date per activity.
     agg_df = df_filtered.groupby("Activity").agg({
         "Start Date": "min",
         "End Date": "max",
-        "Task": "count"  # count tasks per activity as extra info
+        "Task": "count"  # Count tasks per activity as extra info
     }).reset_index()
     agg_df.rename(columns={"Task": "Task Count"}, inplace=True)
 
-    # Create the Gantt chart with activities on the y-axis.
+    # Create the Gantt chart with Activity on the y-axis.
     gantt_fig = px.timeline(
         agg_df,
         x_start="Start Date",
@@ -109,7 +118,7 @@ if not df_filtered.empty:
         hover_data=["Task Count"],
         title="Activity Timeline Gantt Chart",
     )
-    # Reverse y-axis so that the activities are listed in a natural top-to-bottom order.
+    # Reverse the y-axis for natural top-to-bottom order.
     gantt_fig.update_yaxes(autorange="reversed")
     gantt_fig.update_layout(xaxis_title="Timeline", yaxis_title="Activity")
     st.plotly_chart(gantt_fig, use_container_width=True)
