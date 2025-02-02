@@ -20,12 +20,14 @@ def load_data(file_path):
         st.error(f"File {file_path} not found!")
         st.stop()
     df = pd.read_excel(file_path)
+    # Remove extra spaces from column names
+    df.columns = df.columns.str.strip()
     # Convert date columns to datetime
     df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce")
     df["End Date"] = pd.to_datetime(df["End Date"], errors="coerce")
     return df
 
-# Load dataset automatically
+# Load dataset automatically (the file should be in the same directory)
 data_file = "construction_timeline.xlsx"
 df = load_data(data_file)
 
