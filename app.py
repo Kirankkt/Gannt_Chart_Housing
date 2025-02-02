@@ -27,7 +27,7 @@ def load_data(file_path):
     df["End Date"] = pd.to_datetime(df["End Date"], errors="coerce")
     return df
 
-# Load dataset automatically
+# Load dataset automatically (the file should be in the same directory)
 data_file = "construction_timeline.xlsx"
 df = load_data(data_file)
 
@@ -49,7 +49,7 @@ activities = sorted(edited_df["Activity"].dropna().unique())
 selected_activities = st.sidebar.multiselect(
     "Select Activity (leave empty for all)",
     options=activities,
-    default=[]  # default empty, which we'll treat as "all"
+    default=[]
 )
 
 rooms = sorted(edited_df["Room"].dropna().unique())
@@ -76,15 +76,15 @@ selected_date_range = st.sidebar.date_input("Select Date Range", value=[min_date
 # -----------------------------------------------
 df_filtered = edited_df.copy()
 
-# Only filter by Activity if one or more are selected, otherwise show all.
+# Only filter by Activity if one or more are selected; otherwise, show all.
 if selected_activities:
     df_filtered = df_filtered[df_filtered["Activity"].isin(selected_activities)]
 
-# Only filter by Room if one or more are selected, otherwise show all.
+# Only filter by Room if one or more are selected; otherwise, show all.
 if selected_rooms:
     df_filtered = df_filtered[df_filtered["Room"].isin(selected_rooms)]
 
-# Only filter by Status if one or more are selected, otherwise show all.
+# Only filter by Status if one or more are selected; otherwise, show all.
 if selected_statuses:
     df_filtered = df_filtered[df_filtered["Status"].isin(selected_statuses)]
 
@@ -96,31 +96,51 @@ if len(selected_date_range) == 2:
     ]
 
 # -----------------------------------------------
-# 5. Detailed Interactive Gantt Chart (by Activity)
+# 5. Detailed Interactive Gantt Chart
 # -----------------------------------------------
-st.subheader("Gantt Chart Visualization (by Activity)")
+st.subheader("Gantt Chart Visualization")
 if not df_filtered.empty:
-    # Aggregate data by Activity: get the earliest Start Date and latest End Date per activity.
-    agg_df = df_filtered.groupby("Activity").agg({
-        "Start Date": "min",
-        "End Date": "max",
-        "Task": "count"  # Count tasks per activity as extra info
-    }).reset_index()
-    agg_df.rename(columns={"Task": "Task Count"}, inplace=True)
-
-    # Create the Gantt chart with Activity on the y-axis.
-    gantt_fig = px.timeline(
-        agg_df,
-        x_start="Start Date",
-        x_end="End Date",
-        y="Activity",
-        color="Activity",
-        hover_data=["Task Count"],
-        title="Activity Timeline Gantt Chart",
-    )
-    # Reverse the y-axis for natural top-to-bottom order.
-    gantt_fig.update_yaxes(autorange="reversed")
-    gantt_fig.update_layout(xaxis_title="Timeline", yaxis_title="Activity")
+    # If one or more rooms are selected, group by both Activity and Room.
+    if selected_rooms:
+        # Group by both Activity and Room: for each combination, get the earliest start and latest end.
+        agg_df = df_filtered.groupby(["Activity", "Room"]).agg({
+            "Start Date": "min",
+            "End Date": "max",
+            "Task": "count"  # count tasks per group as extra info
+        }).reset_index()
+        agg_df.rename(columns={"Task": "Task Count"}, inplace=True)
+        # Create a new column for clear labeling on the y-axis.
+        agg_df["Activity_Room"] = agg_df["Activity"] + " (" + agg_df["Room"] + ")"
+        gantt_fig = px.timeline(
+            agg_df,
+            x_start="Start Date",
+            x_end="End Date",
+            y="Activity_Room",
+            color="Activity",  # color still by Activity
+            hover_data=["Room", "Task Count"],
+            title="Activity & Room Timeline Gantt Chart",
+        )
+        gantt_fig.update_yaxes(autorange="reversed")
+        gantt_fig.update_layout(xaxis_title="Timeline", yaxis_title="Activity (Room)")
+    else:
+        # Otherwise, group by Activity only.
+        agg_df = df_filtered.groupby("Activity").agg({
+            "Start Date": "min",
+            "End Date": "max",
+            "Task": "count"  # count tasks per activity as extra info
+        }).reset_index()
+        agg_df.rename(columns={"Task": "Task Count"}, inplace=True)
+        gantt_fig = px.timeline(
+            agg_df,
+            x_start="Start Date",
+            x_end="End Date",
+            y="Activity",
+            color="Activity",
+            hover_data=["Task Count"],
+            title="Activity Timeline Gantt Chart",
+        )
+        gantt_fig.update_yaxes(autorange="reversed")
+        gantt_fig.update_layout(xaxis_title="Timeline", yaxis_title="Activity")
     st.plotly_chart(gantt_fig, use_container_width=True)
 else:
     st.info("No data available for the selected filters. Please adjust your filter options.")
