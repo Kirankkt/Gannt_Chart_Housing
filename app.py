@@ -25,7 +25,7 @@ def load_data(file_path):
     # Convert date columns to datetime
     df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce")
     df["End Date"] = pd.to_datetime(df["End Date"], errors="coerce")
-    # Ensure Status is a string for editing
+    # Ensure Status is a string so that it can be edited
     df["Status"] = df["Status"].astype(str)
     return df
 
@@ -40,23 +40,18 @@ st.subheader("Edit Dataset")
 st.markdown(
     """
     **Instructions:**  
-    Please edit any column below—including the **Status** column.  
-    **IMPORTANT:** For the **Status** column, please enter exactly either **Finished** or **In Progress**.
+    You can edit any column below. For the **Status** column, please choose from the dropdown below – either **Finished** or **In Progress**.
     """
 )
-# Use column_config to prompt the user for proper Status entries.
+# Use column_config to force the Status column to be a selectbox with two options.
 column_config = {
-    "Status": st.column_config.TextColumn(
+    "Status": st.column_config.SelectboxColumn(
         "Status",
-        help="Enter only 'Finished' or 'In Progress'."
+        options=["Finished", "In Progress"],
+        help="Select 'Finished' for completed tasks or 'In Progress' for ongoing tasks."
     )
 }
 edited_df = st.data_editor(df, column_config=column_config, use_container_width=True)
-
-# Check for invalid Status values and display a warning if any are found.
-invalid_status = edited_df[~edited_df["Status"].str.strip().isin(["Finished", "In Progress"])]
-if not invalid_status.empty:
-    st.warning("Some rows have a Status that is not 'Finished' or 'In Progress'. Please update them accordingly to avoid errors.")
 
 # ---------------------------------------------------
 # 3. Sidebar Filters & Options
@@ -78,7 +73,7 @@ selected_rooms = st.sidebar.multiselect(
     default=[]
 )
 
-# Allow filtering by Status (if desired)
+# Allow filtering by Status if desired.
 if edited_df["Status"].notna().sum() > 0:
     statuses = sorted(edited_df["Status"].dropna().unique())
     selected_statuses = st.sidebar.multiselect(
@@ -109,7 +104,6 @@ if selected_rooms:
 if selected_statuses:
     df_filtered = df_filtered[df_filtered["Status"].isin(selected_statuses)]
 if not show_finished:
-    # Remove rows where Status (case-insensitive) is "finished"
     df_filtered = df_filtered[~df_filtered["Status"].str.strip().str.lower().eq("finished")]
 
 if len(selected_date_range) == 2:
@@ -132,7 +126,7 @@ def group_status(status_series):
 st.subheader("Gantt Chart Visualization")
 
 if not df_filtered.empty:
-    # Group by Activity and, if a Room filter is applied, include Room.
+    # Group by Activity and (if a Room filter is applied) include Room.
     group_cols = ["Activity", "Room"] if selected_rooms else ["Activity"]
     
     # Use the original aggregation and color by Activity.
