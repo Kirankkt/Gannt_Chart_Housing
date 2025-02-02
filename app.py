@@ -4,16 +4,16 @@ import plotly.express as px
 import io
 import os
 
-# -----------------------------------------------
+# ---------------------------------------------------
 # App Configuration
-# -----------------------------------------------
+# ---------------------------------------------------
 st.set_page_config(page_title="Construction Project Manager", layout="wide")
 st.title("Construction Project Manager")
 st.markdown("A robust ProjectManager-style construction tracking system built with Streamlit.")
 
-# -----------------------------------------------
+# ---------------------------------------------------
 # 1. Data Loading
-# -----------------------------------------------
+# ---------------------------------------------------
 @st.cache_data
 def load_data(file_path):
     if not os.path.exists(file_path):
@@ -25,29 +25,45 @@ def load_data(file_path):
     # Convert date columns to datetime
     df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce")
     df["End Date"] = pd.to_datetime(df["End Date"], errors="coerce")
-    # Add a boolean column 'Finished' based on Status; if Status equals "Finished" (ignoring case), mark True.
-    df["Finished"] = df["Status"].astype(str).str.strip().str.lower() == "finished"
     return df
 
 # Load dataset automatically
 data_file = "construction_timeline.xlsx"
 df = load_data(data_file)
 
-# -----------------------------------------------
-# 2. Data Editing Option (Realtime Updates)
-# -----------------------------------------------
+# ---------------------------------------------------
+# 2. Data Editing Option (Direct Editing)
+# ---------------------------------------------------
 st.subheader("Edit Dataset")
-# Show an inline data editor with a dedicated 'Finished' column for each row.
-# Your boss can simply check/uncheck the box to mark a task as finished.
+# The inline data editor lets your boss update any value (including Status) directly.
 edited_df = st.data_editor(df, use_container_width=True)
 
-# Update the Status column based on the Finished checkbox.
-# (If Finished is True, set Status to "Finished"; otherwise, "In Progress")
-edited_df["Status"] = edited_df["Finished"].apply(lambda x: "Finished" if x else "In Progress")
+# ---------------------------------------------------
+# 3. Optional: Mark Activities as Finished (Override)
+# ---------------------------------------------------
+st.subheader("Mark Entire Activities as Finished")
+st.markdown(
+    """
+    Use the buttons below to mark an entire activity as **Finished**.  
+    When selected, all tasks for that activity will be set to "Finished"; otherwise, they are set to "In Progress".  
+    This option **overrides** the Status values from the data editor.
+    """
+)
+use_activity_buttons = st.checkbox("Override Status using Activity Finished Buttons", value=False)
 
-# -----------------------------------------------
-# 3. Sidebar Filters & Interactive Options
-# -----------------------------------------------
+if use_activity_buttons:
+    activity_updates = {}
+    # List all unique activities in sorted order.
+    for activity in sorted(edited_df["Activity"].dropna().unique()):
+        finished = st.checkbox(f"Mark activity **{activity}** as Finished", key=f"act_{activity}")
+        activity_updates[activity] = finished
+    # Update the Status column for each activity based on the checkbox.
+    for activity, finished in activity_updates.items():
+        edited_df.loc[edited_df["Activity"] == activity, "Status"] = "Finished" if finished else "In Progress"
+
+# ---------------------------------------------------
+# 4. Sidebar Filters & Options
+# ---------------------------------------------------
 st.sidebar.header("Filter Options")
 
 # Dropdown-style multiselects for Activity and Room (empty means show all)
@@ -65,7 +81,7 @@ selected_rooms = st.sidebar.multiselect(
     default=[]
 )
 
-# You can also allow filtering by Status if needed:
+# Optionally filter by Status if desired.
 if edited_df["Status"].notna().sum() > 0:
     statuses = sorted(edited_df["Status"].dropna().unique())
     selected_statuses = st.sidebar.multiselect(
@@ -76,40 +92,32 @@ if edited_df["Status"].notna().sum() > 0:
 else:
     selected_statuses = []
 
-# Interactive toggle to hide finished tasks if desired
+# Toggle: Show or hide finished tasks.
 show_finished = st.sidebar.checkbox("Show Finished Tasks", value=True)
 
-# NEW: Option to apply status-based color differentiation.
+# Option to apply status-based color differentiation.
 # When enabled, finished tasks are colored green and active tasks blue.
 apply_status_color = st.sidebar.checkbox("Apply Status-based Color Differentiation", value=False)
 
-# Filter by Date Range using the min and max dates from the dataset
+# Filter by Date Range (based on min and max dates in the dataset).
 min_date = edited_df["Start Date"].min()
 max_date = edited_df["End Date"].max()
 selected_date_range = st.sidebar.date_input("Select Date Range", value=[min_date, max_date])
 
-# -----------------------------------------------
-# 4. Filtering the DataFrame based on User Input
-# -----------------------------------------------
+# ---------------------------------------------------
+# 5. Filtering the DataFrame Based on User Input
+# ---------------------------------------------------
 df_filtered = edited_df.copy()
 
-# Filter by Activity if any are selected
 if selected_activities:
     df_filtered = df_filtered[df_filtered["Activity"].isin(selected_activities)]
-    
-# Filter by Room if any are selected
 if selected_rooms:
     df_filtered = df_filtered[df_filtered["Room"].isin(selected_rooms)]
-
-# Filter by Status if any are selected
 if selected_statuses:
     df_filtered = df_filtered[df_filtered["Status"].isin(selected_statuses)]
-
-# Filter out finished tasks if user does not want to show them
 if not show_finished:
     df_filtered = df_filtered[~df_filtered["Status"].astype(str).str.strip().str.lower().eq("finished")]
 
-# Apply date filtering (only include tasks within the selected date range)
 if len(selected_date_range) == 2:
     start_range = pd.to_datetime(selected_date_range[0])
     end_range = pd.to_datetime(selected_date_range[1])
@@ -117,9 +125,9 @@ if len(selected_date_range) == 2:
         (df_filtered["Start Date"] >= start_range) & (df_filtered["End Date"] <= end_range)
     ]
 
-# -----------------------------------------------
+# ---------------------------------------------------
 # Helper Function: Group Status Aggregation
-# -----------------------------------------------
+# ---------------------------------------------------
 def group_status(status_series):
     """
     Return "Finished" if all non-null statuses are finished,
@@ -128,20 +136,17 @@ def group_status(status_series):
     statuses = status_series.dropna().astype(str).str.strip().str.lower()
     return "Finished" if len(statuses) > 0 and all(s == "finished" for s in statuses) else "In Progress"
 
-# -----------------------------------------------
-# 5. Detailed Interactive Gantt Chart with Enhanced Hover Data
-# -----------------------------------------------
+# ---------------------------------------------------
+# 6. Detailed Interactive Gantt Chart with Enhanced Hover Data
+# ---------------------------------------------------
 st.subheader("Gantt Chart Visualization")
 
 if not df_filtered.empty:
-    # Decide on grouping based on whether Room filter is active:
-    if selected_rooms:
-        group_cols = ["Activity", "Room"]
-    else:
-        group_cols = ["Activity"]
-        
+    # Determine grouping based on whether a Room filter is applied.
+    group_cols = ["Activity", "Room"] if selected_rooms else ["Activity"]
+    
     if apply_status_color:
-        # When status-based color differentiation is enabled, aggregate status using our helper.
+        # When status-based color differentiation is enabled:
         agg_df = df_filtered.groupby(group_cols).agg({
             "Start Date": "min",
             "End Date": "max",
@@ -154,10 +159,9 @@ if not df_filtered.empty:
         if "Room" in group_cols:
             agg_df["Activity_Room"] = agg_df["Activity"] + " (" + agg_df["Room"] + ")"
         
-        # Map group status to colors: Finished => green, In Progress => blue.
+        # Map status to colors.
         agg_df["Status Color"] = agg_df["Status"].map(lambda s: "green" if s == "Finished" else "blue")
         
-        # Build timeline chart using the custom status color column.
         if "Room" in group_cols:
             gantt_fig = px.timeline(
                 agg_df,
@@ -181,8 +185,7 @@ if not df_filtered.empty:
             )
             gantt_fig.update_layout(yaxis_title="Activity")
     else:
-        # Otherwise, use the original aggregation that groups by Activity (and Room if selected) 
-        # and colors by Activity.
+        # Otherwise, use the original aggregation and color by Activity.
         agg_df = df_filtered.groupby(group_cols).agg({
             "Start Date": "min",
             "End Date": "max",
@@ -214,16 +217,16 @@ if not df_filtered.empty:
                 title="Activity Timeline Gantt Chart",
             )
             gantt_fig.update_layout(yaxis_title="Activity")
-            
+    
     gantt_fig.update_yaxes(autorange="reversed")
     gantt_fig.update_layout(xaxis_title="Timeline")
     st.plotly_chart(gantt_fig, use_container_width=True)
 else:
     st.info("No data available for the selected filters. Please adjust your filter options.")
 
-# -----------------------------------------------
-# 6. Task Progress Tracker with Real-Time Updates
-# -----------------------------------------------
+# ---------------------------------------------------
+# 7. Task Progress Tracker with Real-Time Updates
+# ---------------------------------------------------
 st.subheader("Task Progress Tracker")
 if "Status" in edited_df.columns and edited_df["Status"].notna().any():
     progress_counts = edited_df["Status"].value_counts().reset_index()
@@ -238,9 +241,9 @@ if "Status" in edited_df.columns and edited_df["Status"].notna().any():
 else:
     st.info("No task status data available.")
 
-# -----------------------------------------------
-# 7. Workday Summaries
-# -----------------------------------------------
+# ---------------------------------------------------
+# 8. Workday Summaries
+# ---------------------------------------------------
 st.subheader("Workday Summaries")
 if "Workdays" in edited_df.columns and edited_df["Workdays"].notna().any():
     workday_summary = edited_df.groupby("Activity")["Workdays"].mean().reset_index()
@@ -249,18 +252,18 @@ if "Workdays" in edited_df.columns and edited_df["Workdays"].notna().any():
 else:
     st.info("No workday information available.")
 
-# -----------------------------------------------
-# 8. Detailed Table View for Task & Item Information
-# -----------------------------------------------
+# ---------------------------------------------------
+# 9. Detailed Table View for Task & Item Information
+# ---------------------------------------------------
 st.subheader("Detailed Task Information")
 if not df_filtered.empty:
     st.dataframe(df_filtered[["Activity", "Room", "Item", "Task", "Start Date", "End Date", "Status"]])
 else:
     st.info("No detailed task data to display based on the current filters.")
 
-# -----------------------------------------------
-# 9. Export Options for Filtered Data
-# -----------------------------------------------
+# ---------------------------------------------------
+# 10. Export Options for Filtered Data
+# ---------------------------------------------------
 st.subheader("Export Filtered Data")
 
 def convert_df_to_csv(df):
