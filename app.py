@@ -27,23 +27,23 @@ def load_data(file_path):
     df["End Date"] = pd.to_datetime(df["End Date"], errors="coerce")
     return df
 
-# Load dataset automatically (file must be in the same directory)
+# Load dataset automatically
 data_file = "construction_timeline.xlsx"
 df = load_data(data_file)
 
 # -----------------------------------------------
-# 2. Data Editing Option
+# 2. Data Editing Option (Realtime Updates)
 # -----------------------------------------------
 st.subheader("Edit Dataset")
-# Inline data editor allows your boss to update values directly.
+# Inline data editor lets your boss update values directly.
 edited_df = st.data_editor(df, use_container_width=True)
 
 # -----------------------------------------------
-# 3. Sidebar Filters
+# 3. Sidebar Filters & Interactive Finished-Task Toggle
 # -----------------------------------------------
 st.sidebar.header("Filter Options")
 
-# Dropdown-style multiselects for Activity and Room (empty by default means show all)
+# Dropdown-style multiselects for Activity and Room (empty means show all)
 activities = sorted(edited_df["Activity"].dropna().unique())
 selected_activities = st.sidebar.multiselect(
     "Select Activity (leave empty for all)",
@@ -69,6 +69,9 @@ if edited_df["Status"].notna().sum() > 0:
 else:
     selected_statuses = []
 
+# Interactive toggle to hide finished tasks
+show_finished = st.sidebar.checkbox("Show Finished Tasks", value=True)
+
 # Filter by Date Range using the min and max dates from the dataset
 min_date = edited_df["Start Date"].min()
 max_date = edited_df["End Date"].max()
@@ -91,58 +94,83 @@ if selected_rooms:
 if selected_statuses:
     df_filtered = df_filtered[df_filtered["Status"].isin(selected_statuses)]
 
+# Filter out finished tasks if user does not want to show them
+if not show_finished:
+    # Remove rows where the status (converted to lowercase and stripped) equals "finished"
+    df_filtered = df_filtered[~df_filtered["Status"].str.strip().str.lower().eq("finished")]
+
 # Apply date filtering (only include tasks within the selected date range)
 if len(selected_date_range) == 2:
-    start_range, end_range = pd.to_datetime(selected_date_range[0]), pd.to_datetime(selected_date_range[1])
+    start_range = pd.to_datetime(selected_date_range[0])
+    end_range = pd.to_datetime(selected_date_range[1])
     df_filtered = df_filtered[
         (df_filtered["Start Date"] >= start_range) & (df_filtered["End Date"] <= end_range)
     ]
 
 # -----------------------------------------------
-# 5. Detailed Interactive Gantt Chart with Enhanced Hover Data
+# Helper Function: Group Status Aggregation
+# -----------------------------------------------
+def group_status(status_series):
+    """
+    Return "Finished" if all non-null statuses are finished,
+    otherwise return "In Progress".
+    """
+    # Lowercase and strip all statuses to standardize
+    statuses = status_series.dropna().str.strip().str.lower()
+    return "Finished" if len(statuses) > 0 and all(s == "finished" for s in statuses) else "In Progress"
+
+# -----------------------------------------------
+# 5. Detailed Interactive Gantt Chart with Enhanced Hover Data & Visual Differentiation
 # -----------------------------------------------
 st.subheader("Gantt Chart Visualization")
 
 if not df_filtered.empty:
-    # Determine if room filter is active. If yes, aggregate by both Activity and Room.
+    # If one or more rooms are selected, group by both Activity and Room.
     if selected_rooms:
         agg_df = df_filtered.groupby(["Activity", "Room"]).agg({
             "Start Date": "min",
             "End Date": "max",
+            "Status": group_status,
             "Task": lambda x: ", ".join(sorted(set(x.dropna()))),
             "Item": lambda x: ", ".join(sorted(set(x.dropna())))
         }).reset_index()
         agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
-        # Create a combined label for clarity
         agg_df["Activity_Room"] = agg_df["Activity"] + " (" + agg_df["Room"] + ")"
+        
+        # Map group status to colors: Finished => green, In Progress => blue.
+        agg_df["Status Color"] = agg_df["Status"].map(lambda s: "green" if s == "Finished" else "blue")
         
         gantt_fig = px.timeline(
             agg_df,
             x_start="Start Date",
             x_end="End Date",
             y="Activity_Room",
-            color="Activity",
+            color="Status Color",  # use our custom color column
             hover_data=["Items", "Tasks"],
             title="Activity & Room Timeline Gantt Chart",
         )
         gantt_fig.update_yaxes(autorange="reversed")
         gantt_fig.update_layout(xaxis_title="Timeline", yaxis_title="Activity (Room)")
     else:
-        # If no room filter is applied, aggregate by Activity only.
+        # Otherwise, group by Activity only.
         agg_df = df_filtered.groupby("Activity").agg({
             "Start Date": "min",
             "End Date": "max",
+            "Status": group_status,
             "Task": lambda x: ", ".join(sorted(set(x.dropna()))),
             "Item": lambda x: ", ".join(sorted(set(x.dropna())))
         }).reset_index()
         agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
+        
+        # Map group status to colors
+        agg_df["Status Color"] = agg_df["Status"].map(lambda s: "green" if s == "Finished" else "blue")
         
         gantt_fig = px.timeline(
             agg_df,
             x_start="Start Date",
             x_end="End Date",
             y="Activity",
-            color="Activity",
+            color="Status Color",  # use our custom color column
             hover_data=["Items", "Tasks"],
             title="Activity Timeline Gantt Chart",
         )
@@ -154,12 +182,18 @@ else:
     st.info("No data available for the selected filters. Please adjust your filter options.")
 
 # -----------------------------------------------
-# 6. Task Progress Tracker
+# 6. Task Progress Tracker with Real-Time Updates
 # -----------------------------------------------
 st.subheader("Task Progress Tracker")
 if "Status" in edited_df.columns and edited_df["Status"].notna().any():
     progress_counts = edited_df["Status"].value_counts().reset_index()
     progress_counts.columns = ["Status", "Count"]
+    
+    total_tasks = edited_df.shape[0]
+    finished_tasks = edited_df[edited_df["Status"].str.strip().str.lower() == "finished"].shape[0]
+    completion_percentage = (finished_tasks / total_tasks) * 100 if total_tasks > 0 else 0
+    
+    st.metric("Overall Completion", f"{completion_percentage:.1f}%")
     st.dataframe(progress_counts, use_container_width=True)
 else:
     st.info("No task status data available.")
@@ -180,7 +214,6 @@ else:
 # -----------------------------------------------
 st.subheader("Detailed Task Information")
 if not df_filtered.empty:
-    # Display key columns so your boss can see exactly what work is happening
     st.dataframe(df_filtered[["Activity", "Room", "Item", "Task", "Start Date", "End Date", "Status"]])
 else:
     st.info("No detailed task data to display based on the current filters.")
