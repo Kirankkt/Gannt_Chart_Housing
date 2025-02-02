@@ -27,7 +27,7 @@ def load_data(file_path):
     df["End Date"] = pd.to_datetime(df["End Date"], errors="coerce")
     return df
 
-# Load dataset automatically (the file should be in the same directory)
+# Load dataset automatically (file must be in the same directory)
 data_file = "construction_timeline.xlsx"
 df = load_data(data_file)
 
@@ -35,7 +35,7 @@ df = load_data(data_file)
 # 2. Data Editing Option
 # -----------------------------------------------
 st.subheader("Edit Dataset")
-# Inline editing of the dataset
+# Inline data editor allows your boss to update values directly.
 edited_df = st.data_editor(df, use_container_width=True)
 
 # -----------------------------------------------
@@ -43,8 +43,7 @@ edited_df = st.data_editor(df, use_container_width=True)
 # -----------------------------------------------
 st.sidebar.header("Filter Options")
 
-# For Activity and Room, use dropdown-style multiselects that start with no selection.
-# In our filtering logic, an empty selection means "show all".
+# Dropdown-style multiselects for Activity and Room (empty by default means show all)
 activities = sorted(edited_df["Activity"].dropna().unique())
 selected_activities = st.sidebar.multiselect(
     "Select Activity (leave empty for all)",
@@ -62,7 +61,11 @@ selected_rooms = st.sidebar.multiselect(
 # Filter by Status (if available)
 if edited_df["Status"].notna().sum() > 0:
     statuses = sorted(edited_df["Status"].dropna().unique())
-    selected_statuses = st.sidebar.multiselect("Select Status (leave empty for all)", options=statuses, default=[])
+    selected_statuses = st.sidebar.multiselect(
+        "Select Status (leave empty for all)",
+        options=statuses,
+        default=[]
+    )
 else:
     selected_statuses = []
 
@@ -76,19 +79,19 @@ selected_date_range = st.sidebar.date_input("Select Date Range", value=[min_date
 # -----------------------------------------------
 df_filtered = edited_df.copy()
 
-# Only filter by Activity if one or more are selected; otherwise, show all.
+# Filter by Activity if any are selected
 if selected_activities:
     df_filtered = df_filtered[df_filtered["Activity"].isin(selected_activities)]
-
-# Only filter by Room if one or more are selected; otherwise, show all.
+    
+# Filter by Room if any are selected
 if selected_rooms:
     df_filtered = df_filtered[df_filtered["Room"].isin(selected_rooms)]
 
-# Only filter by Status if one or more are selected; otherwise, show all.
+# Filter by Status if any are selected
 if selected_statuses:
     df_filtered = df_filtered[df_filtered["Status"].isin(selected_statuses)]
 
-# Apply date filtering: show tasks that fall within the selected date range.
+# Apply date filtering (only include tasks within the selected date range)
 if len(selected_date_range) == 2:
     start_range, end_range = pd.to_datetime(selected_date_range[0]), pd.to_datetime(selected_date_range[1])
     df_filtered = df_filtered[
@@ -96,51 +99,56 @@ if len(selected_date_range) == 2:
     ]
 
 # -----------------------------------------------
-# 5. Detailed Interactive Gantt Chart
+# 5. Detailed Interactive Gantt Chart with Enhanced Hover Data
 # -----------------------------------------------
 st.subheader("Gantt Chart Visualization")
+
 if not df_filtered.empty:
-    # If one or more rooms are selected, group by both Activity and Room.
+    # Determine if room filter is active. If yes, aggregate by both Activity and Room.
     if selected_rooms:
-        # Group by both Activity and Room: for each combination, get the earliest start and latest end.
         agg_df = df_filtered.groupby(["Activity", "Room"]).agg({
             "Start Date": "min",
             "End Date": "max",
-            "Task": "count"  # count tasks per group as extra info
+            "Task": lambda x: ", ".join(sorted(set(x.dropna()))),
+            "Item": lambda x: ", ".join(sorted(set(x.dropna())))
         }).reset_index()
-        agg_df.rename(columns={"Task": "Task Count"}, inplace=True)
-        # Create a new column for clear labeling on the y-axis.
+        agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
+        # Create a combined label for clarity
         agg_df["Activity_Room"] = agg_df["Activity"] + " (" + agg_df["Room"] + ")"
+        
         gantt_fig = px.timeline(
             agg_df,
             x_start="Start Date",
             x_end="End Date",
             y="Activity_Room",
-            color="Activity",  # color still by Activity
-            hover_data=["Room", "Task Count"],
+            color="Activity",
+            hover_data=["Items", "Tasks"],
             title="Activity & Room Timeline Gantt Chart",
         )
         gantt_fig.update_yaxes(autorange="reversed")
         gantt_fig.update_layout(xaxis_title="Timeline", yaxis_title="Activity (Room)")
     else:
-        # Otherwise, group by Activity only.
+        # If no room filter is applied, aggregate by Activity only.
         agg_df = df_filtered.groupby("Activity").agg({
             "Start Date": "min",
             "End Date": "max",
-            "Task": "count"  # count tasks per activity as extra info
+            "Task": lambda x: ", ".join(sorted(set(x.dropna()))),
+            "Item": lambda x: ", ".join(sorted(set(x.dropna())))
         }).reset_index()
-        agg_df.rename(columns={"Task": "Task Count"}, inplace=True)
+        agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
+        
         gantt_fig = px.timeline(
             agg_df,
             x_start="Start Date",
             x_end="End Date",
             y="Activity",
             color="Activity",
-            hover_data=["Task Count"],
+            hover_data=["Items", "Tasks"],
             title="Activity Timeline Gantt Chart",
         )
         gantt_fig.update_yaxes(autorange="reversed")
         gantt_fig.update_layout(xaxis_title="Timeline", yaxis_title="Activity")
+        
     st.plotly_chart(gantt_fig, use_container_width=True)
 else:
     st.info("No data available for the selected filters. Please adjust your filter options.")
@@ -168,7 +176,17 @@ else:
     st.info("No workday information available.")
 
 # -----------------------------------------------
-# 8. Export Options for Filtered Data
+# 8. Detailed Table View for Task & Item Information
+# -----------------------------------------------
+st.subheader("Detailed Task Information")
+if not df_filtered.empty:
+    # Display key columns so your boss can see exactly what work is happening
+    st.dataframe(df_filtered[["Activity", "Room", "Item", "Task", "Start Date", "End Date", "Status"]])
+else:
+    st.info("No detailed task data to display based on the current filters.")
+
+# -----------------------------------------------
+# 9. Export Options for Filtered Data
 # -----------------------------------------------
 st.subheader("Export Filtered Data")
 
