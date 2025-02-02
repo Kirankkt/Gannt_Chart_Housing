@@ -14,6 +14,8 @@ st.markdown("A robust ProjectManager-style construction tracking system built wi
 # ---------------------------------------------------
 # 1. Data Loading
 # ---------------------------------------------------
+DATA_FILE = "construction_timeline.xlsx"
+
 @st.cache_data
 def load_data(file_path):
     if not os.path.exists(file_path):
@@ -29,9 +31,7 @@ def load_data(file_path):
     df["Status"] = df["Status"].astype(str)
     return df
 
-# Load dataset automatically
-data_file = "construction_timeline.xlsx"
-df = load_data(data_file)
+df = load_data(DATA_FILE)
 
 # ---------------------------------------------------
 # 2. Data Editing Option (Direct Editing)
@@ -43,7 +43,6 @@ st.markdown(
     You can edit any column below. For the **Status** column, please choose from the dropdown below – either **Finished** or **In Progress**.
     """
 )
-# Use column_config to force the Status column to be a selectbox with two options.
 column_config = {
     "Status": st.column_config.SelectboxColumn(
         "Status",
@@ -54,11 +53,23 @@ column_config = {
 edited_df = st.data_editor(df, column_config=column_config, use_container_width=True)
 
 # ---------------------------------------------------
-# 3. Sidebar Filters & Options
+# 2a. Save Button to Persist Changes
+# ---------------------------------------------------
+if st.button("Save Updates"):
+    try:
+        # Write the updated DataFrame back to the same Excel file.
+        edited_df.to_excel(DATA_FILE, index=False)
+        st.success("Data successfully saved!")
+        # Clear the cache so that the next load uses the updated file.
+        load_data.clear()
+    except Exception as e:
+        st.error(f"Error saving data: {e}")
+
+# ---------------------------------------------------
+# 3. Sidebar Filters & Options (remains unchanged)
 # ---------------------------------------------------
 st.sidebar.header("Filter Options")
 
-# Dropdown-style multiselects for Activity and Room (empty means show all)
 activities = sorted(edited_df["Activity"].dropna().unique())
 selected_activities = st.sidebar.multiselect(
     "Select Activity (leave empty for all)",
@@ -73,7 +84,6 @@ selected_rooms = st.sidebar.multiselect(
     default=[]
 )
 
-# Allow filtering by Status if desired.
 if edited_df["Status"].notna().sum() > 0:
     statuses = sorted(edited_df["Status"].dropna().unique())
     selected_statuses = st.sidebar.multiselect(
@@ -84,10 +94,7 @@ if edited_df["Status"].notna().sum() > 0:
 else:
     selected_statuses = []
 
-# Toggle: Show or hide finished tasks.
 show_finished = st.sidebar.checkbox("Show Finished Tasks", value=True)
-
-# Filter by Date Range using the min and max dates from the dataset.
 min_date = edited_df["Start Date"].min()
 max_date = edited_df["End Date"].max()
 selected_date_range = st.sidebar.date_input("Select Date Range", value=[min_date, max_date])
@@ -105,7 +112,6 @@ if selected_statuses:
     df_filtered = df_filtered[df_filtered["Status"].isin(selected_statuses)]
 if not show_finished:
     df_filtered = df_filtered[~df_filtered["Status"].str.strip().str.lower().eq("finished")]
-
 if len(selected_date_range) == 2:
     start_range = pd.to_datetime(selected_date_range[0])
     end_range = pd.to_datetime(selected_date_range[1])
@@ -126,10 +132,7 @@ def group_status(status_series):
 st.subheader("Gantt Chart Visualization")
 
 if not df_filtered.empty:
-    # Group by Activity and (if a Room filter is applied) include Room.
     group_cols = ["Activity", "Room"] if selected_rooms else ["Activity"]
-    
-    # Use the original aggregation and color by Activity.
     agg_df = df_filtered.groupby(group_cols).agg({
         "Start Date": "min",
         "End Date": "max",
