@@ -17,28 +17,28 @@ st.title("🏗️ Construction Project Tracker")
 
 # Sidebar filters
 st.sidebar.header("Filter Options")
-activity_filter = st.sidebar.selectbox("Select Activity:", options=['All'] + list(df['Activity'].unique()), index=0)
-room_filter = st.sidebar.selectbox("Select Room:", options=['All'] + list(df['Room'].unique()), index=0)
+activity_filter = st.sidebar.multiselect("Select Activities:", df['Activity'].unique(), default=df['Activity'].unique())
+room_filter = st.sidebar.multiselect("Select Rooms:", df['Room'].unique(), default=df['Room'].unique())
 
 # Apply filters
-if activity_filter != 'All':
-    df = df[df['Activity'] == activity_filter]
-if room_filter != 'All':
-    df = df[df['Room'] == room_filter]
+df_filtered = df[(df['Activity'].isin(activity_filter)) & (df['Room'].isin(room_filter))]
 
 # Gantt Chart
 st.subheader("📅 Gantt Chart - Construction Timeline")
-df = df.sort_values(by='Start Date')
-fig = px.timeline(df, x_start='Start Date', x_end='End Date', y='Task', color='Activity', title="Construction Schedule",
-                  labels={'Task': 'Construction Task'}, hover_data=['Room', 'Location', 'Workdays', 'Status'])
-fig.update_yaxes(categoryorder='total ascending')  # Improves readability
-fig.update_layout(xaxis_title="Timeline", yaxis_title="Tasks", hovermode="x unified")
-st.plotly_chart(fig)
+if not df_filtered.empty:
+    df_filtered = df_filtered.sort_values(by='Start Date')
+    fig = px.timeline(df_filtered, x_start='Start Date', x_end='End Date', y='Task', color='Activity', title="Construction Schedule",
+                      labels={'Task': 'Construction Task'}, hover_data=['Room', 'Location', 'Workdays', 'Status'])
+    fig.update_yaxes(categoryorder='total ascending')  # Improves readability
+    fig.update_layout(xaxis_title="Timeline", yaxis_title="Tasks", hovermode="x unified")
+    st.plotly_chart(fig)
+else:
+    st.warning("No data available for the selected filters.")
 
 # Task Progress Summary
 st.subheader("📊 Task Progress Summary")
-if 'Status' in df.columns:
-    status_counts = df['Status'].value_counts().reset_index()
+if 'Status' in df_filtered.columns and not df_filtered.empty:
+    status_counts = df_filtered['Status'].value_counts().reset_index()
     status_counts.columns = ['Status', 'Count']
     st.dataframe(status_counts)
 else:
@@ -46,14 +46,14 @@ else:
 
 # Workdays Summary
 st.subheader("⏳ Workdays Analysis")
-if 'Workdays' in df.columns:
-    st.write(f"Total Workdays: {df['Workdays'].sum()} days")
-    st.write(f"Average Workdays per Task: {df['Workdays'].mean():.2f} days")
+if 'Workdays' in df_filtered.columns and not df_filtered.empty:
+    st.write(f"Total Workdays: {df_filtered['Workdays'].sum()} days")
+    st.write(f"Average Workdays per Task: {df_filtered['Workdays'].mean():.2f} days")
 else:
     st.write("No workdays data available.")
 
 # Download CSV Option
 st.sidebar.subheader("📥 Download Data")
-st.sidebar.download_button("Download CSV", df.to_csv(index=False), file_name="Construction_Timeline.csv", mime="text/csv")
+st.sidebar.download_button("Download CSV", df_filtered.to_csv(index=False), file_name="Construction_Timeline.csv", mime="text/csv")
 
 # Run: streamlit run <filename.py>
