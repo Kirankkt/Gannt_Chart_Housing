@@ -39,7 +39,7 @@ st.subheader("Edit Dataset")
 edited_df = st.data_editor(df, use_container_width=True)
 
 # -----------------------------------------------
-# 3. Sidebar Filters & Interactive Finished-Task Toggle
+# 3. Sidebar Filters & Interactive Options
 # -----------------------------------------------
 st.sidebar.header("Filter Options")
 
@@ -69,8 +69,11 @@ if edited_df["Status"].notna().sum() > 0:
 else:
     selected_statuses = []
 
-# Interactive toggle to hide finished tasks
+# Interactive toggle to hide finished tasks (if desired)
 show_finished = st.sidebar.checkbox("Show Finished Tasks", value=True)
+
+# NEW: Option to apply status-based color differentiation (finished tasks in green, active tasks in blue)
+apply_status_color = st.sidebar.checkbox("Apply Status-based Color Differentiation", value=False)
 
 # Filter by Date Range using the min and max dates from the dataset
 min_date = edited_df["Start Date"].min()
@@ -119,14 +122,20 @@ def group_status(status_series):
     return "Finished" if len(statuses) > 0 and all(s == "finished" for s in statuses) else "In Progress"
 
 # -----------------------------------------------
-# 5. Detailed Interactive Gantt Chart with Enhanced Hover Data & Visual Differentiation
+# 5. Detailed Interactive Gantt Chart with Enhanced Hover Data
 # -----------------------------------------------
 st.subheader("Gantt Chart Visualization")
 
 if not df_filtered.empty:
-    # If one or more rooms are selected, group by both Activity and Room.
+    # Decide on grouping based on whether Room filter is active:
     if selected_rooms:
-        agg_df = df_filtered.groupby(["Activity", "Room"]).agg({
+        group_cols = ["Activity", "Room"]
+    else:
+        group_cols = ["Activity"]
+        
+    if apply_status_color:
+        # When status-based color differentiation is enabled, aggregate status via our helper function.
+        agg_df = df_filtered.groupby(group_cols).agg({
             "Start Date": "min",
             "End Date": "max",
             "Status": group_status,
@@ -134,48 +143,73 @@ if not df_filtered.empty:
             "Item": lambda x: ", ".join(sorted(set(x.dropna())))
         }).reset_index()
         agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
-        agg_df["Activity_Room"] = agg_df["Activity"] + " (" + agg_df["Room"] + ")"
+        
+        if "Room" in group_cols:
+            agg_df["Activity_Room"] = agg_df["Activity"] + " (" + agg_df["Room"] + ")"
         
         # Map group status to colors: Finished => green, In Progress => blue.
         agg_df["Status Color"] = agg_df["Status"].map(lambda s: "green" if s == "Finished" else "blue")
         
-        gantt_fig = px.timeline(
-            agg_df,
-            x_start="Start Date",
-            x_end="End Date",
-            y="Activity_Room",
-            color="Status Color",  # use our custom color column
-            hover_data=["Items", "Tasks"],
-            title="Activity & Room Timeline Gantt Chart",
-        )
-        gantt_fig.update_yaxes(autorange="reversed")
-        gantt_fig.update_layout(xaxis_title="Timeline", yaxis_title="Activity (Room)")
+        # Build timeline chart using the custom status color column
+        if "Room" in group_cols:
+            gantt_fig = px.timeline(
+                agg_df,
+                x_start="Start Date",
+                x_end="End Date",
+                y="Activity_Room",
+                color="Status Color",
+                hover_data=["Items", "Tasks"],
+                title="Activity & Room Timeline Gantt Chart (Status-based Colors)",
+            )
+            gantt_fig.update_layout(yaxis_title="Activity (Room)")
+        else:
+            gantt_fig = px.timeline(
+                agg_df,
+                x_start="Start Date",
+                x_end="End Date",
+                y="Activity",
+                color="Status Color",
+                hover_data=["Items", "Tasks"],
+                title="Activity Timeline Gantt Chart (Status-based Colors)",
+            )
+            gantt_fig.update_layout(yaxis_title="Activity")
     else:
-        # Otherwise, group by Activity only.
-        agg_df = df_filtered.groupby("Activity").agg({
+        # Otherwise, use the original aggregation that groups by activity (and room if selected) 
+        # and colors by Activity.
+        agg_df = df_filtered.groupby(group_cols).agg({
             "Start Date": "min",
             "End Date": "max",
-            "Status": group_status,
             "Task": lambda x: ", ".join(sorted(set(x.dropna()))),
             "Item": lambda x: ", ".join(sorted(set(x.dropna())))
         }).reset_index()
         agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
         
-        # Map group status to colors
-        agg_df["Status Color"] = agg_df["Status"].map(lambda s: "green" if s == "Finished" else "blue")
-        
-        gantt_fig = px.timeline(
-            agg_df,
-            x_start="Start Date",
-            x_end="End Date",
-            y="Activity",
-            color="Status Color",  # using the custom color column
-            hover_data=["Items", "Tasks"],
-            title="Activity Timeline Gantt Chart",
-        )
-        gantt_fig.update_yaxes(autorange="reversed")
-        gantt_fig.update_layout(xaxis_title="Timeline", yaxis_title="Activity")
-        
+        if "Room" in group_cols:
+            agg_df["Activity_Room"] = agg_df["Activity"] + " (" + agg_df["Room"] + ")"
+            gantt_fig = px.timeline(
+                agg_df,
+                x_start="Start Date",
+                x_end="End Date",
+                y="Activity_Room",
+                color="Activity",
+                hover_data=["Items", "Tasks"],
+                title="Activity & Room Timeline Gantt Chart",
+            )
+            gantt_fig.update_layout(yaxis_title="Activity (Room)")
+        else:
+            gantt_fig = px.timeline(
+                agg_df,
+                x_start="Start Date",
+                x_end="End Date",
+                y="Activity",
+                color="Activity",
+                hover_data=["Items", "Tasks"],
+                title="Activity Timeline Gantt Chart",
+            )
+            gantt_fig.update_layout(yaxis_title="Activity")
+            
+    gantt_fig.update_yaxes(autorange="reversed")
+    gantt_fig.update_layout(xaxis_title="Timeline")
     st.plotly_chart(gantt_fig, use_container_width=True)
 else:
     st.info("No data available for the selected filters. Please adjust your filter options.")
