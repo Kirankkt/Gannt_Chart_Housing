@@ -25,6 +25,8 @@ def load_data(file_path):
     # Convert date columns to datetime
     df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce")
     df["End Date"] = pd.to_datetime(df["End Date"], errors="coerce")
+    # Add a boolean column 'Finished' based on Status; if Status equals "Finished" (ignoring case), mark True.
+    df["Finished"] = df["Status"].astype(str).str.strip().str.lower() == "finished"
     return df
 
 # Load dataset automatically
@@ -35,8 +37,13 @@ df = load_data(data_file)
 # 2. Data Editing Option (Realtime Updates)
 # -----------------------------------------------
 st.subheader("Edit Dataset")
-# Inline data editor lets your boss update values directly.
+# Show an inline data editor with a dedicated 'Finished' column for each row.
+# Your boss can simply check/uncheck the box to mark a task as finished.
 edited_df = st.data_editor(df, use_container_width=True)
+
+# Update the Status column based on the Finished checkbox.
+# (If Finished is True, set Status to "Finished"; otherwise, "In Progress")
+edited_df["Status"] = edited_df["Finished"].apply(lambda x: "Finished" if x else "In Progress")
 
 # -----------------------------------------------
 # 3. Sidebar Filters & Interactive Options
@@ -58,7 +65,7 @@ selected_rooms = st.sidebar.multiselect(
     default=[]
 )
 
-# Filter by Status (if available)
+# You can also allow filtering by Status if needed:
 if edited_df["Status"].notna().sum() > 0:
     statuses = sorted(edited_df["Status"].dropna().unique())
     selected_statuses = st.sidebar.multiselect(
@@ -69,10 +76,11 @@ if edited_df["Status"].notna().sum() > 0:
 else:
     selected_statuses = []
 
-# Interactive toggle to hide finished tasks (if desired)
+# Interactive toggle to hide finished tasks if desired
 show_finished = st.sidebar.checkbox("Show Finished Tasks", value=True)
 
-# NEW: Option to apply status-based color differentiation (finished tasks in green, active tasks in blue)
+# NEW: Option to apply status-based color differentiation.
+# When enabled, finished tasks are colored green and active tasks blue.
 apply_status_color = st.sidebar.checkbox("Apply Status-based Color Differentiation", value=False)
 
 # Filter by Date Range using the min and max dates from the dataset
@@ -117,7 +125,6 @@ def group_status(status_series):
     Return "Finished" if all non-null statuses are finished,
     otherwise return "In Progress".
     """
-    # Convert values to string, drop NA, then standardize
     statuses = status_series.dropna().astype(str).str.strip().str.lower()
     return "Finished" if len(statuses) > 0 and all(s == "finished" for s in statuses) else "In Progress"
 
@@ -134,7 +141,7 @@ if not df_filtered.empty:
         group_cols = ["Activity"]
         
     if apply_status_color:
-        # When status-based color differentiation is enabled, aggregate status via our helper function.
+        # When status-based color differentiation is enabled, aggregate status using our helper.
         agg_df = df_filtered.groupby(group_cols).agg({
             "Start Date": "min",
             "End Date": "max",
@@ -150,7 +157,7 @@ if not df_filtered.empty:
         # Map group status to colors: Finished => green, In Progress => blue.
         agg_df["Status Color"] = agg_df["Status"].map(lambda s: "green" if s == "Finished" else "blue")
         
-        # Build timeline chart using the custom status color column
+        # Build timeline chart using the custom status color column.
         if "Room" in group_cols:
             gantt_fig = px.timeline(
                 agg_df,
@@ -174,7 +181,7 @@ if not df_filtered.empty:
             )
             gantt_fig.update_layout(yaxis_title="Activity")
     else:
-        # Otherwise, use the original aggregation that groups by activity (and room if selected) 
+        # Otherwise, use the original aggregation that groups by Activity (and Room if selected) 
         # and colors by Activity.
         agg_df = df_filtered.groupby(group_cols).agg({
             "Start Date": "min",
