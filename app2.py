@@ -28,99 +28,48 @@ def load_data(file_path):
     df.columns = df.columns.str.strip()
     df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce")
     df["End Date"] = pd.to_datetime(df["End Date"], errors="coerce")
+    # Ensure Status is a string
     df["Status"] = df["Status"].astype(str)
-    # Add extra columns with default values if missing
-    extra_cols = {
-        "Progress": 0.0,
-        "Priority": "Normal",
-        "Planned Start": pd.NaT,
-        "Actual Start": pd.NaT,
-        "Due": pd.NaT,
-        "Finish": pd.NaT,
-        "Duration": 0,
-        "Hours": 0.0,
-        "Cost": 0.0
-    }
-    for col, default in extra_cols.items():
-        if col not in df.columns:
-            df[col] = default
     return df
 
 DATA_FILE = "construction_timeline.xlsx"
-df = load_data(DATA_FILE)  # This is our original dataset (augmented in memory)
+df = load_data(DATA_FILE)
 
 # ---------------------------------------------------
-# 2. Basic Data Editing (Main Fields)
+# 2. Data Editing Option (Direct Editing)
 # ---------------------------------------------------
-st.subheader("Update Task Information (Basic Fields)")
+st.subheader("Update Task Information")
 st.markdown(
     """
     **Instructions:**  
-    You can update basic fields below. For the **Status** column, please choose from the dropdown – select either **Finished** or **In Progress**.
+    You can update any field below. For the **Status** column, please choose from the dropdown – select either **Finished** or **In Progress**.
     """
 )
-basic_col_config = {
+column_config = {
     "Status": st.column_config.SelectboxColumn(
         "Status",
         options=["Finished", "In Progress"],
         help="Select 'Finished' for completed tasks or 'In Progress' for ongoing tasks."
     )
 }
-edited_df = st.data_editor(df, column_config=basic_col_config, use_container_width=True)
+edited_df = st.data_editor(df, column_config=column_config, use_container_width=True)
 edited_df["Status"] = edited_df["Status"].fillna("In Progress").replace("", "In Progress")
 
-if st.button("Save Basic Updates"):
+# ---------------------------------------------------
+# 2a. Save Updates Button
+# ---------------------------------------------------
+if st.button("Save Updates"):
     try:
         edited_df.to_excel(DATA_FILE, index=False)
-        st.success("Basic data successfully saved!")
-        load_data.clear()  # Clear cache so that next load uses updated data
+        st.success("Data successfully saved!")
+        load_data.clear()  # Clear cache so next load uses updated data
     except Exception as e:
         st.error(f"Error saving data: {e}")
 
 # ---------------------------------------------------
-# 3. Detailed Task Editing (Additional Fields)
+# 3. Sidebar Filters & Options
 # ---------------------------------------------------
-with st.expander("Edit Detailed Task (Additional Fields)"):
-    st.markdown("Select a task (by row index) to update additional details.")
-    # Use the DataFrame index (converted to string) as task ID
-    task_ids = df.index.astype(str).tolist()
-    selected_row = st.selectbox("Select Task Row (by index)", options=task_ids)
-    row = df.loc[int(selected_row)]
-    # Display current values for the extra fields; if a column is missing, use a default message.
-    extra_fields = ["Progress", "Priority", "Planned Start", "Actual Start", "Due", "Finish", "Duration", "Hours", "Cost"]
-    # To safely display, use .get() for each field:
-    current_values = {col: row.get(col, "N/A") for col in extra_fields}
-    st.write("Current extra values for the selected task:")
-    st.write(current_values)
-    with st.form("edit_detailed_task_form"):
-        progress = st.number_input("Progress (%)", value=float(row.get("Progress", 0.0)), min_value=0.0, max_value=100.0, step=1.0)
-        priority = st.text_input("Priority", value=row.get("Priority", "Normal"))
-        planned_start = st.date_input("Planned Start", value=(row["Planned Start"].date() if pd.notnull(row["Planned Start"]) else datetime.today().date()))
-        actual_start = st.date_input("Actual Start", value=(row["Actual Start"].date() if pd.notnull(row["Actual Start"]) else datetime.today().date()))
-        due_date = st.date_input("Due", value=(row["Due"].date() if pd.notnull(row["Due"]) else datetime.today().date()))
-        finish_date = st.date_input("Finish", value=(row["Finish"].date() if pd.notnull(row["Finish"]) else datetime.today().date()))
-        duration = st.number_input("Duration (days)", value=int(row.get("Duration", 0)), step=1)
-        hours = st.number_input("Hours", value=float(row.get("Hours", 0.0)), step=0.5)
-        cost = st.number_input("Cost", value=float(row.get("Cost", 0.0)), step=1.0)
-        submitted = st.form_submit_button("Update Detailed Task")
-        if submitted:
-            df.at[int(selected_row), "Progress"] = progress
-            df.at[int(selected_row), "Priority"] = priority
-            df.at[int(selected_row), "Planned Start"] = pd.to_datetime(planned_start)
-            df.at[int(selected_row), "Actual Start"] = pd.to_datetime(actual_start)
-            df.at[int(selected_row), "Due"] = pd.to_datetime(due_date)
-            df.at[int(selected_row), "Finish"] = pd.to_datetime(finish_date)
-            df.at[int(selected_row), "Duration"] = duration
-            df.at[int(selected_row), "Hours"] = hours
-            df.at[int(selected_row), "Cost"] = cost
-            df.to_excel(DATA_FILE, index=False)
-            st.success("Detailed task updated and saved!")
-            load_data.clear()
-
-# ---------------------------------------------------
-# 4 (again). Sidebar Filters for Main View
-# ---------------------------------------------------
-st.sidebar.header("Filter Options (Main View)")
+st.sidebar.header("Filter Options")
 activities = sorted(edited_df["Activity"].dropna().unique())
 selected_activities = st.sidebar.multiselect("Select Activity (leave empty for all)", options=activities, default=[])
 rooms = sorted(edited_df["Room"].dropna().unique())
@@ -131,13 +80,14 @@ if edited_df["Status"].notna().sum() > 0:
 else:
     selected_statuses = []
 show_finished = st.sidebar.checkbox("Show Finished Tasks", value=True)
+# NEW: Toggle for color-coding the aggregated Gantt chart by activity status.
 color_by_status = st.sidebar.checkbox("Color-code Gantt Chart by Activity Status", value=True)
 min_date = edited_df["Start Date"].min()
 max_date = edited_df["End Date"].max()
 selected_date_range = st.sidebar.date_input("Select Date Range", value=[min_date, max_date])
 
 # ---------------------------------------------------
-# 5. Filtering the DataFrame for Main View
+# 4. Filtering the DataFrame Based on User Input
 # ---------------------------------------------------
 df_filtered = edited_df.copy()
 if selected_activities:
@@ -154,11 +104,11 @@ if len(selected_date_range) == 2:
     df_filtered = df_filtered[(df_filtered["Start Date"] >= start_range) & (df_filtered["End Date"] <= end_range)]
 
 # ---------------------------------------------------
-# 6. Helper Function: Compute Aggregated Status for an Activity
+# 5. Helper Function: Compute Aggregated Status for an Activity
 # ---------------------------------------------------
 def aggregated_status(group_df):
     now = pd.Timestamp(datetime.today().date())
-    # If any task is manually "in progress", return "In Progress"
+    # First, if any task is manually set to "in progress", return "In Progress"
     if any(group_df["Status"].str.strip().str.lower() == "in progress"):
         return "In Progress"
     # If all tasks are finished, decide based on the latest end date.
@@ -168,14 +118,272 @@ def aggregated_status(group_df):
             return "Finished On Time"
         else:
             return "Finished Late"
-    # If today is before the earliest start date, return "Not Started"
+    # Otherwise, if today is before the earliest start date, return "Not Started"
     min_start = group_df["Start Date"].dt.normalize().min()
     if now < min_start:
         return "Not Started"
+    # Else, default to "In Progress"
     return "In Progress"
 
 # ---------------------------------------------------
-# 7. Gantt Chart Generation (Aggregated by Activity)
+# 6. Gantt Chart Generation
+# ---------------------------------------------------
+def create_gantt_chart(df_filtered, color_by_status=False):
+    if color_by_status:
+        # Aggregate by Activity only.
+        agg_df = df_filtered.groupby("Activity").agg({
+            "Start Date": "min",
+            "End Date": "max"
+        }).reset_index()
+        # Compute the aggregated status per activity.
+        def compute_activity_status(activity):
+            subset = df_filtered[df_filtered["Activity"] == activity]
+            return aggregated_status(subset)
+        agg_df["Display Status"] = agg_df["Activity"].apply(compute_activity_status)
+        # Define custom color mapping.
+        color_discrete_map = {
+            "Not Started": "lightgray",
+            "In Progress": "blue",
+            "Finished On Time": "green",
+            "Finished Late": "orange"
+        }
+        fig = px.timeline(
+            agg_df,
+            x_start="Start Date",
+            x_end="End Date",
+            y="Activity",
+            color="Display Status",
+            color_discrete_map=color_discrete_map,
+            title="Activity Timeline (Color-coded by Status)"
+        )
+        fig.update_layout(yaxis_title="Activity")
+    else:
+        # Use the original aggregated view (by Activity or Activity+Room) colored by Activity.
+        group_cols = ["Activity", "Room"] if selected_rooms else ["Activity"]
+        agg_df = df_filtered.groupby(group_cols).agg({
+            "Start Date": "min",
+            "End Date": "max",
+            "Task": lambda x: ", ".join(sorted(set(x.dropna()))),
+            "Item": lambda x: ", ".join(sorted(set(x.dropna())))
+        }).reset_index()
+        agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
+        if "Room" in group_cols:
+            agg_df["Activity_Room"] = agg_df["Activity"] + " (" + agg_df["Room"] + ")"
+            fig = px.timeline(
+                agg_df,
+                x_start="Start Date",
+                x_end="End Date",
+                y="Activity_Room",
+                color="Activity",
+                hover_data=["Items", "Tasks"],
+                title="Activity & Room Timeline"
+            )
+            fig.update_layout(yaxis_title="Activity (Room)")
+        else:
+            fig = px.timeline(
+                agg_df,
+                x_start="Start Date",
+                x_end="End Date",
+                y="Activity",
+                color="Activity",
+                hover_data=["Items", "Tasks"],
+                title="Activity Timeline"
+            )
+            fig.update_layout(yaxis_title="Activity")
+    fig.update_yaxes(autorange="reversed")
+    fig.update_layout(xaxis_title="Timeline")
+    return fig
+
+gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status)
+
+# ---------------------------------------------------
+# 7. Overall Completion & Progress Bar Calculation
+# ---------------------------------------------------
+total_tasks = edited_df.shape[0]
+finished_tasks = edited_df[edited_df["Status"].str.strip().str.lower() == "finished"].shape[0]
+completion_percentage = (finished_tasks / total_tasks) * 100 if total_tasks > 0 else 0
+
+# ---------------------------------------------------
+# 8. Detailed Status Summary (for Detailed Summary Tab)
+# ---------------------------------------------------
+def get_status_category(status):
+    s = status.strip().lower()
+    if s == "finished":
+        return "Finished"
+    elif s == "in progress":
+        return "In Progress"
+    else:
+        return "Not Declared"
+edited_df["Status Category"] = edited_df["Status"].apply(get_status_category)
+status_summary = edited_df.groupby("Status Category").size().reset_index(name="Count")
+desired_order = ["Not Declared", "In Progress", "Finished"]
+status_summary["Order"] = status_summary["Status Category"].apply(lambda x: desired_order.index(x) if x in desired_order else 99)
+status_summary = status_summary.sort_values("Order").drop("Order", axis=1)
+
+# ---------------------------------------------------
+# 9. Additional Dashboard Features
+# ---------------------------------------------------
+today = pd.Timestamp(datetime.today().date())
+overdue_df = df_filtered[(df_filtered["End Date"] < today) &
+                         (df_filtered["Status"].str.strip().str.lower() != "finished")]
+overdue_count = overdue_df.shape[0]
+task_distribution = df_filtered.groupby("Activity").size().reset_index(name="Task Count")
+dist_fig = px.bar(task_distribution, x="Activity", y="Task Count", title="Task Distribution by Activity")
+upcoming_start = today
+upcoming_end = today + pd.Timedelta(days=7)
+upcoming_df = df_filtered[(df_filtered["Start Date"] >= upcoming_start) & (df_filtered["Start Date"] <= upcoming_end)]
+filter_summary = []
+if selected_activities:
+    filter_summary.append("Activities: " + ", ".join(selected_activities))
+if selected_rooms:
+    filter_summary.append("Rooms: " + ", ".join(selected_rooms))
+if selected_statuses:
+    filter_summary.append("Status: " + ", ".join(selected_statuses))
+if selected_date_range:
+    filter_summary.append(f"Date Range: {selected_date_range[0]} to {selected_date_range[1]}")
+filter_summary_text = "; ".join(filter_summary) if filter_summary else "No filters applied."
+tasks_in_progress = edited_df[edited_df["Status"].str.strip().str.lower() == "in progress"].shape[0]
+not_declared = edited_df[~edited_df["Status"].str.strip().str.lower().isin(["finished", "in progress"])].shape[0]
+notes_df = df_filtered[df_filtered["Notes"].notna() & (df_filtered["Notes"].str.strip() != "")]
+
+# ---------------------------------------------------
+# 10. Additional Template Functions (for Reports)
+# ---------------------------------------------------
+def generate_work_order_report(form_data):
+    doc = Document()
+    doc.add_heading("Work Order", 0)
+    doc.add_paragraph(f"Work Order Number: {form_data.get('work_order_number', '')}")
+    doc.add_paragraph(f"Contractor: {form_data.get('contractor', '')}")
+    doc.add_heading("Work Description", level=1)
+    doc.add_paragraph(form_data.get("description", ""))
+    doc.add_heading("Assigned Tasks", level=1)
+    doc.add_paragraph(form_data.get("tasks", ""))
+    doc.add_paragraph(f"Due Date: {form_data.get('due_date', '')}")
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_risk_register_report(form_data):
+    doc = Document()
+    doc.add_heading("Risk Register", 0)
+    doc.add_paragraph(f"Risk ID: {form_data.get('risk_id', '')}")
+    doc.add_heading("Risk Description", level=1)
+    doc.add_paragraph(form_data.get("description", ""))
+    doc.add_paragraph(f"Impact: {form_data.get('impact', '')}")
+    doc.add_paragraph(f"Likelihood: {form_data.get('likelihood', '')}")
+    doc.add_heading("Mitigation Plan", level=1)
+    doc.add_paragraph(form_data.get("mitigation", ""))
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_rfq_report(form_data):
+    doc = Document()
+    doc.add_heading("Request for Quote (RFQ)", 0)
+    doc.add_paragraph(f"Quotation Number: {form_data.get('quotation_number', '')}")
+    doc.add_paragraph(f"Customer ID: {form_data.get('customer_id', '')}")
+    doc.add_paragraph(f"Company Name: {form_data.get('company_name', '')}")
+    doc.add_heading("Requested Items/Services", level=1)
+    doc.add_paragraph(form_data.get("requested", ""))
+    doc.add_paragraph(f"Quote Validity (days): {form_data.get('validity', '')}")
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_rfp_report(form_data):
+    doc = Document()
+    doc.add_heading("Request for Proposal (RFP)", 0)
+    doc.add_paragraph(f"RFP Number: {form_data.get('rfp_number', '')}")
+    doc.add_heading("Project Background", level=1)
+    doc.add_paragraph(form_data.get("background", ""))
+    doc.add_heading("Scope of Work", level=1)
+    doc.add_paragraph(form_data.get("scope", ""))
+    doc.add_paragraph(f"Timeline: {form_data.get('timeline', '')}")
+    doc.add_paragraph(f"Submission Deadline: {form_data.get('deadline', '')}")
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_rfi_report(form_data):
+    doc = Document()
+    doc.add_heading("Request for Information (RFI)", 0)
+    doc.add_paragraph(f"RFI Number: {form_data.get('rfi_number', '')}")
+    doc.add_paragraph(f"Subject: {form_data.get('subject', '')}")
+    doc.add_heading("Question", level=1)
+    doc.add_paragraph(form_data.get("question", ""))
+    doc.add_paragraph(f"Requested Response Date: {form_data.get('response_date', '')}")
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_schedule_of_values_report(form_data):
+    doc = Document()
+    doc.add_heading("Schedule of Values", 0)
+    doc.add_paragraph(f"Project: {form_data.get('project', '')}")
+    doc.add_paragraph(f"Total Contract Amount: {form_data.get('total_amount', '')}")
+    doc.add_heading("Task Breakdown", level=1)
+    doc.add_paragraph(form_data.get("breakdown", ""))
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_contractor_estimate_report(form_data):
+    doc = Document()
+    doc.add_heading("Contractor Estimate", 0)
+    doc.add_paragraph(f"Estimate Number: {form_data.get('estimate_number', '')}")
+    doc.add_paragraph(f"Project: {form_data.get('project', '')}")
+    doc.add_paragraph(f"Estimated Material Costs: {form_data.get('material_costs', '')}")
+    doc.add_paragraph(f"Estimated Labor Costs: {form_data.get('labor_costs', '')}")
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_construction_quote_report(form_data):
+    doc = Document()
+    doc.add_heading("Construction Quote", 0)
+    doc.add_paragraph(f"Quote Number: {form_data.get('quote_number', '')}")
+    doc.add_paragraph(f"Project: {form_data.get('project', '')}")
+    doc.add_paragraph(f"Estimated Total Cost: {form_data.get('total_cost', '')}")
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_scope_of_work_report(form_data):
+    doc = Document()
+    doc.add_heading("Scope of Work", 0)
+    doc.add_paragraph(f"Project Name: {form_data.get('project_name', '')}")
+    doc.add_heading("Scope Details", level=1)
+    doc.add_paragraph(form_data.get("scope_details", ""))
+    doc.add_heading("Milestones and Deliverables", level=1)
+    doc.add_paragraph(form_data.get("milestones", ""))
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_painting_estimate_report(form_data):
+    doc = Document()
+    doc.add_heading("Painting Estimate", 0)
+    doc.add_paragraph(f"Estimate Number: {form_data.get('estimate_number', '')}")
+    doc.add_paragraph(f"Project/Location: {form_data.get('project', '')}")
+    doc.add_paragraph(f"Estimated Material Costs: {form_data.get('material_costs', '')}")
+    doc.add_paragraph(f"Estimated Labor Costs: {form_data.get('labor_costs', '')}")
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_roofing_estimate_report(form_data):
+    doc = Document()
+    doc.add_heading("Roofing Estimate", 0)
+    doc.add_paragraph(f"Estimate Number: {form_data.get('estimate_number', '')}")
+    doc.add_paragraph(f"Total Area (sq ft): {form_data.get('area', '')}")
+    doc.add_paragraph(f"Material Specification: {form_data.get('materials', '')}")
+    doc.add_paragraph(f"Estimated Cost: {form_data.get('estimated_cost', '')}")
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+# ---------------------------------------------------
+# 10. Gantt Chart Generation (Aggregated by Activity)
 # ---------------------------------------------------
 def create_gantt_chart(df_filtered, color_by_status=False):
     if color_by_status:
@@ -203,18 +411,6 @@ def create_gantt_chart(df_filtered, color_by_status=False):
             title="Activity Timeline (Color-coded by Status)"
         )
         fig.update_layout(yaxis_title="Activity")
-        # Annotate with average progress per activity
-        progress_avg = df_filtered.groupby("Activity")["Progress"].mean().reset_index()
-        for _, r in progress_avg.iterrows():
-            # Get the end date for this activity from agg_df:
-            end_date = agg_df.loc[agg_df["Activity"] == r["Activity"], "End Date"].values[0]
-            fig.add_annotation(
-                x=end_date,
-                y=r["Activity"],
-                text=f"{r['Progress']:.0f}%",
-                showarrow=False,
-                xanchor="left"
-            )
     else:
         group_cols = ["Activity", "Room"] if selected_rooms else ["Activity"]
         agg_df = df_filtered.groupby(group_cols).agg({
@@ -254,14 +450,14 @@ def create_gantt_chart(df_filtered, color_by_status=False):
 gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status)
 
 # ---------------------------------------------------
-# 8. Overall Completion & Progress Bar Calculation
+# 11. Overall Completion & Progress Bar Calculation
 # ---------------------------------------------------
 total_tasks = edited_df.shape[0]
 finished_tasks = edited_df[edited_df["Status"].str.strip().str.lower() == "finished"].shape[0]
 completion_percentage = (finished_tasks / total_tasks) * 100 if total_tasks > 0 else 0
 
 # ---------------------------------------------------
-# 9. Detailed Status Summary (for Detailed Summary Tab)
+# 12. Detailed Status Summary (for Detailed Summary Tab)
 # ---------------------------------------------------
 def get_status_category(status):
     s = status.strip().lower()
@@ -278,7 +474,7 @@ status_summary["Order"] = status_summary["Status Category"].apply(lambda x: desi
 status_summary = status_summary.sort_values("Order").drop("Order", axis=1)
 
 # ---------------------------------------------------
-# 10. Additional Dashboard Features
+# 13. Additional Dashboard Features
 # ---------------------------------------------------
 today = pd.Timestamp(datetime.today().date())
 overdue_df = df_filtered[(df_filtered["End Date"] < today) &
@@ -304,9 +500,9 @@ not_declared = edited_df[~edited_df["Status"].str.strip().str.lower().isin(["fin
 notes_df = df_filtered[df_filtered["Notes"].notna() & (df_filtered["Notes"].str.strip() != "")]
 
 # ---------------------------------------------------
-# 11. Layout with Tabs: Dashboard, Detailed Summary, Reports, Original Dataset
+# 14. Layout with Tabs: Dashboard, Detailed Summary, Reports
 # ---------------------------------------------------
-tabs = st.tabs(["Dashboard", "Detailed Summary", "Reports", "Original Dataset"])
+tabs = st.tabs(["Dashboard", "Detailed Summary", "Reports"])
 
 # ---------- Dashboard Tab ----------
 with tabs[0]:
@@ -356,6 +552,7 @@ with tabs[1]:
 # ---------- Reports Tab ----------
 with tabs[2]:
     st.header("Reports")
+    # Construction Daily Report Section
     st.markdown("### Construction Daily Report")
     def generate_daily_report(df):
         document = Document()
@@ -392,6 +589,7 @@ with tabs[2]:
     
     st.markdown("---")
     
+    # Change Order Template Section
     st.markdown("### Change Order Template")
     with st.form("change_order_form"):
         change_order_number = st.text_input("Change Order Number")
@@ -438,6 +636,7 @@ with tabs[2]:
     
     st.markdown("---")
     
+    # Additional Templates Section
     st.markdown("### Additional Templates")
     template_choice = st.selectbox("Select Template to Generate", options=[
         "Work Order Template",
@@ -711,10 +910,5 @@ with tabs[2]:
     excel_data = convert_df_to_excel(df_filtered)
     st.download_button(label="Download Filtered Data as Excel", data=excel_data, file_name="filtered_construction_data.xlsx", mime="application/vnd.ms-excel")
     
-# ---------- Original Dataset Tab ----------
-with tabs[3]:
-    st.header("Original Dataset")
-    st.dataframe(df)
-
 st.markdown("---")
 st.markdown("Developed with a forward-thinking, data-driven approach. Enjoy tracking your construction project!")
