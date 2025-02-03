@@ -12,7 +12,7 @@ from docx.shared import Inches
 # ---------------------------------------------------
 st.set_page_config(page_title="Construction Project Manager Dashboard", layout="wide")
 st.title("Construction Project Manager Dashboard")
-st.markdown("This dashboard provides an executive overview of the project—including task snapshots, timeline visualization, and detailed status reports. Use the sidebar to filter the data.")
+st.markdown("This dashboard provides an executive overview of the project—including task snapshots, timeline visualization, and detailed reports. Use the sidebar to filter the data.")
 
 # ---------------------------------------------------
 # 1. Data Loading from Excel
@@ -27,7 +27,7 @@ def load_data(file_path):
     df.columns = df.columns.str.strip()
     df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce")
     df["End Date"] = pd.to_datetime(df["End Date"], errors="coerce")
-    # Ensure Status is a string so it can be edited
+    # Ensure Status is a string
     df["Status"] = df["Status"].astype(str)
     return df
 
@@ -44,7 +44,7 @@ st.markdown(
     You can update any field below. For the **Status** column, please choose from the dropdown – select either **Finished** or **In Progress**.
     """
 )
-# Use column_config to force the Status column to be a selectbox.
+# Force the Status column to be a dropdown.
 column_config = {
     "Status": st.column_config.SelectboxColumn(
         "Status",
@@ -64,7 +64,7 @@ if st.button("Save Updates"):
     try:
         edited_df.to_excel(DATA_FILE, index=False)
         st.success("Data successfully saved!")
-        load_data.clear()  # Clear cache to force reload on next run
+        load_data.clear()  # Clear cache so that the next load uses the updated file
     except Exception as e:
         st.error(f"Error saving data: {e}")
 
@@ -73,43 +73,26 @@ if st.button("Save Updates"):
 # ---------------------------------------------------
 st.sidebar.header("Filter Options")
 
-# Activity Filter (empty = show all)
 activities = sorted(edited_df["Activity"].dropna().unique())
-selected_activities = st.sidebar.multiselect(
-    "Select Activity (leave empty for all)",
-    options=activities,
-    default=[]
-)
+selected_activities = st.sidebar.multiselect("Select Activity (leave empty for all)", options=activities, default=[])
 
-# Room Filter (empty = show all)
 rooms = sorted(edited_df["Room"].dropna().unique())
-selected_rooms = st.sidebar.multiselect(
-    "Select Room (leave empty for all)",
-    options=rooms,
-    default=[]
-)
+selected_rooms = st.sidebar.multiselect("Select Room (leave empty for all)", options=rooms, default=[])
 
-# Status Filter (empty = show all)
 if edited_df["Status"].notna().sum() > 0:
     statuses = sorted(edited_df["Status"].dropna().unique())
-    selected_statuses = st.sidebar.multiselect(
-        "Select Status (leave empty for all)",
-        options=statuses,
-        default=[]
-    )
+    selected_statuses = st.sidebar.multiselect("Select Status (leave empty for all)", options=statuses, default=[])
 else:
     selected_statuses = []
 
-# Checkbox: Show Finished Tasks?
 show_finished = st.sidebar.checkbox("Show Finished Tasks", value=True)
 
-# Date Range Filter
 min_date = edited_df["Start Date"].min()
 max_date = edited_df["End Date"].max()
 selected_date_range = st.sidebar.date_input("Select Date Range", value=[min_date, max_date])
 
 # ---------------------------------------------------
-# 4. Filtering the DataFrame Based on User Input
+# 4. Filter the DataFrame Based on User Input
 # ---------------------------------------------------
 df_filtered = edited_df.copy()
 if selected_activities:
@@ -126,10 +109,9 @@ if len(selected_date_range) == 2:
     df_filtered = df_filtered[(df_filtered["Start Date"] >= start_range) & (df_filtered["End Date"] <= end_range)]
 
 # ---------------------------------------------------
-# 5. Gantt Chart Generation Function
+# 5. Gantt Chart Generation
 # ---------------------------------------------------
 def create_gantt_chart(df_filtered):
-    # Group by Activity and, if Room filter applied, include Room.
     group_cols = ["Activity", "Room"] if selected_rooms else ["Activity"]
     agg_df = df_filtered.groupby(group_cols).agg({
         "Start Date": "min",
@@ -138,6 +120,7 @@ def create_gantt_chart(df_filtered):
         "Item": lambda x: ", ".join(sorted(set(x.dropna())))
     }).reset_index()
     agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
+    
     if "Room" in group_cols:
         agg_df["Activity_Room"] = agg_df["Activity"] + " (" + agg_df["Room"] + ")"
         fig = px.timeline(
@@ -161,6 +144,7 @@ def create_gantt_chart(df_filtered):
             title="Activity Timeline"
         )
         fig.update_layout(yaxis_title="Activity")
+    
     fig.update_yaxes(autorange="reversed")
     fig.update_layout(xaxis_title="Timeline")
     return fig
@@ -168,7 +152,7 @@ def create_gantt_chart(df_filtered):
 gantt_fig = create_gantt_chart(df_filtered)
 
 # ---------------------------------------------------
-# 6. Overall Completion & Progress Bar Calculation
+# 6. Overall Completion & Progress Bar
 # ---------------------------------------------------
 total_tasks = edited_df.shape[0]
 finished_tasks = edited_df[edited_df["Status"].str.strip().str.lower() == "finished"].shape[0]
@@ -193,7 +177,62 @@ status_summary["Order"] = status_summary["Status Category"].apply(lambda x: desi
 status_summary = status_summary.sort_values("Order").drop("Order", axis=1)
 
 # ---------------------------------------------------
-# 8. Layout with Tabs: Dashboard, Detailed Summary, Reports
+# 8. Reports: Construction Daily Report & Change Order Template
+# ---------------------------------------------------
+def generate_daily_report(df):
+    """
+    Generate a Word document report that lists each task (with Activity, Room, Task, Status, Start and End dates)
+    for the current day (or for the filtered dataset).
+    """
+    document = Document()
+    document.add_heading("Construction Daily Report", 0)
+    document.add_paragraph(f"Report generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    document.add_heading("Daily Tasks", level=1)
+    table = document.add_table(rows=1, cols=6)
+    hdr_cells = table.rows[0].cells
+    hdr_cells[0].text = "Activity"
+    hdr_cells[1].text = "Room"
+    hdr_cells[2].text = "Task"
+    hdr_cells[3].text = "Status"
+    hdr_cells[4].text = "Start Date"
+    hdr_cells[5].text = "End Date"
+    # For simplicity, include all filtered tasks in the daily report.
+    for _, row in df.iterrows():
+        row_cells = table.add_row().cells
+        row_cells[0].text = str(row["Activity"])
+        row_cells[1].text = str(row["Room"])
+        row_cells[2].text = str(row["Task"])
+        row_cells[3].text = str(row["Status"])
+        row_cells[4].text = row["Start Date"].strftime("%Y-%m-%d") if pd.notnull(row["Start Date"]) else ""
+        row_cells[5].text = row["End Date"].strftime("%Y-%m-%d") if pd.notnull(row["End Date"]) else ""
+    f = io.BytesIO()
+    document.save(f)
+    return f.getvalue()
+
+def generate_change_order_report(form_data):
+    """
+    Generate a Word document change order form using the data from the form.
+    """
+    document = Document()
+    document.add_heading("Change Order Form", 0)
+    document.add_paragraph(f"Date: {form_data['date']}")
+    document.add_paragraph(f"Change Order Number: {form_data['change_order_number']}")
+    document.add_paragraph(f"Project Name: {form_data['project_name']}")
+    document.add_paragraph(f"Requested By: {form_data['requested_by']}")
+    document.add_heading("Change Description", level=1)
+    document.add_paragraph(form_data['change_description'])
+    document.add_heading("Reason for Change", level=1)
+    document.add_paragraph(form_data['reason_for_change'])
+    document.add_heading("Estimated Cost Impact", level=1)
+    document.add_paragraph(form_data['estimated_cost_impact'])
+    document.add_heading("Approval", level=1)
+    document.add_paragraph(form_data['approval'])
+    f = io.BytesIO()
+    document.save(f)
+    return f.getvalue()
+
+# ---------------------------------------------------
+# 9. Layout with Tabs: Dashboard, Detailed Summary, Reports
 # ---------------------------------------------------
 tabs = st.tabs(["Dashboard", "Detailed Summary", "Reports"])
 
@@ -222,36 +261,51 @@ with tabs[1]:
 # ---------- Reports Tab ----------
 with tabs[2]:
     st.header("Reports")
-    st.markdown("### Download Project Report")
     
-    def generate_word_report(df, status_summary, overall_completion):
-        document = Document()
-        document.add_heading("Construction Project Report", 0)
-        document.add_paragraph(f"Report generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        document.add_heading("Overall Project Completion", level=1)
-        document.add_paragraph(f"{overall_completion:.1f}% of tasks are finished.")
-        document.add_heading("Task Status Summary", level=1)
-        table = document.add_table(rows=1, cols=2)
-        hdr_cells = table.rows[0].cells
-        hdr_cells[0].text = "Status Category"
-        hdr_cells[1].text = "Count"
-        for index, row in status_summary.iterrows():
-            row_cells = table.add_row().cells
-            row_cells[0].text = str(row["Status Category"])
-            row_cells[1].text = str(row["Count"])
-        document.add_paragraph("\nPlease refer to the dashboard for more details.")
-        f = io.BytesIO()
-        document.save(f)
-        return f.getvalue()
-
-    word_report = generate_word_report(edited_df, status_summary, completion_percentage)
+    # Construction Daily Report Section
+    st.markdown("### Construction Daily Report")
+    daily_report = generate_daily_report(df_filtered)
     st.download_button(
-        label="Download Report as Word Document",
-        data=word_report,
-        file_name="Construction_Project_Report.docx",
+        label="Download Daily Report as Word Document",
+        data=daily_report,
+        file_name="Construction_Daily_Report.docx",
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
     
+    st.markdown("---")
+    
+    # Change Order Template Section
+    st.markdown("### Change Order Template")
+    with st.form("change_order_form"):
+        change_order_number = st.text_input("Change Order Number")
+        project_name = st.text_input("Project Name")
+        requested_by = st.text_input("Requested By")
+        date = st.date_input("Date", value=datetime.today())
+        change_description = st.text_area("Change Description")
+        reason_for_change = st.text_area("Reason for Change")
+        estimated_cost_impact = st.text_input("Estimated Cost Impact")
+        approval = st.text_input("Approval (Enter name of approver)")
+        submitted = st.form_submit_button("Generate Change Order Document")
+        if submitted:
+            form_data = {
+                "change_order_number": change_order_number,
+                "project_name": project_name,
+                "requested_by": requested_by,
+                "date": date.strftime("%Y-%m-%d"),
+                "change_description": change_description,
+                "reason_for_change": reason_for_change,
+                "estimated_cost_impact": estimated_cost_impact,
+                "approval": approval
+            }
+            change_order_doc = generate_change_order_report(form_data)
+            st.download_button(
+                label="Download Change Order Document",
+                data=change_order_doc,
+                file_name="Change_Order_Document.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
+    
+    st.markdown("---")
     st.markdown("### Export Data")
     def convert_df_to_csv(df):
         return df.to_csv(index=False).encode("utf-8")
