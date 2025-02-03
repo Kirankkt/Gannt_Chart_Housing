@@ -3,13 +3,16 @@ import pandas as pd
 import plotly.express as px
 import io
 import os
+from datetime import datetime
+from docx import Document
+from docx.shared import Inches
 
 # ---------------------------------------------------
 # App Configuration
 # ---------------------------------------------------
 st.set_page_config(page_title="Construction Project Manager Dashboard", layout="wide")
 st.title("Construction Project Manager Dashboard")
-st.markdown("This dashboard provides an executive overview of the project—including a snapshot of tasks, timeline visualization, and detailed status reports. Use the sidebar to filter the data.")
+st.markdown("This dashboard provides an executive overview of the project—including task snapshots, timeline visualization, and detailed status reports. Use the sidebar to filter the data.")
 
 # ---------------------------------------------------
 # 1. Data Loading from Excel
@@ -38,10 +41,10 @@ st.subheader("Update Task Information")
 st.markdown(
     """
     **Instructions:**  
-    You can update any field below. For the **Status** column, please choose from the dropdown below – select either **Finished** or **In Progress**.
+    You can update any field below. For the **Status** column, please choose from the dropdown – select either **Finished** or **In Progress**.
     """
 )
-# Use column_config to force the Status column to be a selectbox with allowed values.
+# Use column_config to force the Status column to be a selectbox.
 column_config = {
     "Status": st.column_config.SelectboxColumn(
         "Status",
@@ -59,11 +62,9 @@ edited_df["Status"] = edited_df["Status"].fillna("In Progress").replace("", "In 
 # ---------------------------------------------------
 if st.button("Save Updates"):
     try:
-        # Write the updated DataFrame back to the Excel file.
         edited_df.to_excel(DATA_FILE, index=False)
         st.success("Data successfully saved!")
-        # Clear cache so subsequent loads use updated data.
-        load_data.clear()
+        load_data.clear()  # Clear cache to force reload on next run
     except Exception as e:
         st.error(f"Error saving data: {e}")
 
@@ -72,7 +73,7 @@ if st.button("Save Updates"):
 # ---------------------------------------------------
 st.sidebar.header("Filter Options")
 
-# Filter by Activity (empty means show all)
+# Activity Filter (empty = show all)
 activities = sorted(edited_df["Activity"].dropna().unique())
 selected_activities = st.sidebar.multiselect(
     "Select Activity (leave empty for all)",
@@ -80,7 +81,7 @@ selected_activities = st.sidebar.multiselect(
     default=[]
 )
 
-# Filter by Room (empty means show all)
+# Room Filter (empty = show all)
 rooms = sorted(edited_df["Room"].dropna().unique())
 selected_rooms = st.sidebar.multiselect(
     "Select Room (leave empty for all)",
@@ -88,7 +89,7 @@ selected_rooms = st.sidebar.multiselect(
     default=[]
 )
 
-# Filter by Status (empty means show all)
+# Status Filter (empty = show all)
 if edited_df["Status"].notna().sum() > 0:
     statuses = sorted(edited_df["Status"].dropna().unique())
     selected_statuses = st.sidebar.multiselect(
@@ -99,16 +100,16 @@ if edited_df["Status"].notna().sum() > 0:
 else:
     selected_statuses = []
 
-# Checkbox: Show or hide finished tasks.
+# Checkbox: Show Finished Tasks?
 show_finished = st.sidebar.checkbox("Show Finished Tasks", value=True)
 
-# Date Range Filter based on dataset dates.
+# Date Range Filter
 min_date = edited_df["Start Date"].min()
 max_date = edited_df["End Date"].max()
 selected_date_range = st.sidebar.date_input("Select Date Range", value=[min_date, max_date])
 
 # ---------------------------------------------------
-# 4. Filter the DataFrame Based on User Input
+# 4. Filtering the DataFrame Based on User Input
 # ---------------------------------------------------
 df_filtered = edited_df.copy()
 if selected_activities:
@@ -128,7 +129,7 @@ if len(selected_date_range) == 2:
 # 5. Gantt Chart Generation Function
 # ---------------------------------------------------
 def create_gantt_chart(df_filtered):
-    # Group by Activity and, if a Room filter is applied, by Room.
+    # Group by Activity and, if Room filter applied, include Room.
     group_cols = ["Activity", "Room"] if selected_rooms else ["Activity"]
     agg_df = df_filtered.groupby(group_cols).agg({
         "Start Date": "min",
@@ -137,7 +138,6 @@ def create_gantt_chart(df_filtered):
         "Item": lambda x: ", ".join(sorted(set(x.dropna())))
     }).reset_index()
     agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
-    
     if "Room" in group_cols:
         agg_df["Activity_Room"] = agg_df["Activity"] + " (" + agg_df["Room"] + ")"
         fig = px.timeline(
@@ -161,7 +161,6 @@ def create_gantt_chart(df_filtered):
             title="Activity Timeline"
         )
         fig.update_layout(yaxis_title="Activity")
-    
     fig.update_yaxes(autorange="reversed")
     fig.update_layout(xaxis_title="Timeline")
     return fig
@@ -176,7 +175,7 @@ finished_tasks = edited_df[edited_df["Status"].str.strip().str.lower() == "finis
 completion_percentage = (finished_tasks / total_tasks) * 100 if total_tasks > 0 else 0
 
 # ---------------------------------------------------
-# 7. Create a Detailed Status Summary
+# 7. Detailed Status Summary (for Detailed Summary Tab)
 # ---------------------------------------------------
 def get_status_category(status):
     s = status.strip().lower()
@@ -189,7 +188,6 @@ def get_status_category(status):
 
 edited_df["Status Category"] = edited_df["Status"].apply(get_status_category)
 status_summary = edited_df.groupby("Status Category").size().reset_index(name="Count")
-# Ensure the order is consistent: Not Declared, In Progress, Finished
 desired_order = ["Not Declared", "In Progress", "Finished"]
 status_summary["Order"] = status_summary["Status Category"].apply(lambda x: desired_order.index(x) if x in desired_order else 99)
 status_summary = status_summary.sort_values("Order").drop("Order", axis=1)
@@ -224,10 +222,36 @@ with tabs[1]:
 # ---------- Reports Tab ----------
 with tabs[2]:
     st.header("Reports")
-    st.markdown("### Task Status Distribution")
-    # Create a pie chart for task status distribution
-    pie_fig = px.pie(edited_df, names="Status Category", title="Task Status Distribution")
-    st.plotly_chart(pie_fig, use_container_width=True)
+    st.markdown("### Download Project Report")
+    
+    def generate_word_report(df, status_summary, overall_completion):
+        document = Document()
+        document.add_heading("Construction Project Report", 0)
+        document.add_paragraph(f"Report generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        document.add_heading("Overall Project Completion", level=1)
+        document.add_paragraph(f"{overall_completion:.1f}% of tasks are finished.")
+        document.add_heading("Task Status Summary", level=1)
+        table = document.add_table(rows=1, cols=2)
+        hdr_cells = table.rows[0].cells
+        hdr_cells[0].text = "Status Category"
+        hdr_cells[1].text = "Count"
+        for index, row in status_summary.iterrows():
+            row_cells = table.add_row().cells
+            row_cells[0].text = str(row["Status Category"])
+            row_cells[1].text = str(row["Count"])
+        document.add_paragraph("\nPlease refer to the dashboard for more details.")
+        f = io.BytesIO()
+        document.save(f)
+        return f.getvalue()
+
+    word_report = generate_word_report(edited_df, status_summary, completion_percentage)
+    st.download_button(
+        label="Download Report as Word Document",
+        data=word_report,
+        file_name="Construction_Project_Report.docx",
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    
     st.markdown("### Export Data")
     def convert_df_to_csv(df):
         return df.to_csv(index=False).encode("utf-8")
