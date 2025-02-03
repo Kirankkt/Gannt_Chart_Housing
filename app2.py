@@ -9,7 +9,7 @@ import os
 # ---------------------------------------------------
 st.set_page_config(page_title="Construction Project Manager Dashboard", layout="wide")
 st.title("Construction Project Manager Dashboard")
-st.markdown("This dashboard provides an overview of the current project status—including task details, timelines, and key performance metrics. Use the sidebar to filter the data.")
+st.markdown("This dashboard provides an executive overview of the project—including a snapshot of tasks, timeline visualization, and detailed status reports. Use the sidebar to filter the data.")
 
 # ---------------------------------------------------
 # 1. Data Loading from Excel
@@ -24,7 +24,7 @@ def load_data(file_path):
     df.columns = df.columns.str.strip()
     df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce")
     df["End Date"] = pd.to_datetime(df["End Date"], errors="coerce")
-    # Ensure Status is a string
+    # Ensure Status is a string so it can be edited
     df["Status"] = df["Status"].astype(str)
     return df
 
@@ -38,10 +38,10 @@ st.subheader("Update Task Information")
 st.markdown(
     """
     **Instructions:**  
-    You can update any field below. For the **Status** column, please select from the dropdown—choose either **Finished** or **In Progress**.
+    You can update any field below. For the **Status** column, please choose from the dropdown below – select either **Finished** or **In Progress**.
     """
 )
-# Use column_config to force the Status column to be a selectbox with allowed options.
+# Use column_config to force the Status column to be a selectbox with allowed values.
 column_config = {
     "Status": st.column_config.SelectboxColumn(
         "Status",
@@ -51,7 +51,7 @@ column_config = {
 }
 edited_df = st.data_editor(df, column_config=column_config, use_container_width=True)
 
-# Ensure that any blank or missing status is replaced by "In Progress"
+# Replace blank or missing statuses with "In Progress"
 edited_df["Status"] = edited_df["Status"].fillna("In Progress").replace("", "In Progress")
 
 # ---------------------------------------------------
@@ -62,7 +62,7 @@ if st.button("Save Updates"):
         # Write the updated DataFrame back to the Excel file.
         edited_df.to_excel(DATA_FILE, index=False)
         st.success("Data successfully saved!")
-        # Optionally, clear the cache so that the next load uses the updated file.
+        # Clear cache so subsequent loads use updated data.
         load_data.clear()
     except Exception as e:
         st.error(f"Error saving data: {e}")
@@ -102,16 +102,15 @@ else:
 # Checkbox: Show or hide finished tasks.
 show_finished = st.sidebar.checkbox("Show Finished Tasks", value=True)
 
-# Date Range Filter
+# Date Range Filter based on dataset dates.
 min_date = edited_df["Start Date"].min()
 max_date = edited_df["End Date"].max()
 selected_date_range = st.sidebar.date_input("Select Date Range", value=[min_date, max_date])
 
 # ---------------------------------------------------
-# 4. Filtering the DataFrame Based on User Input
+# 4. Filter the DataFrame Based on User Input
 # ---------------------------------------------------
 df_filtered = edited_df.copy()
-
 if selected_activities:
     df_filtered = df_filtered[df_filtered["Activity"].isin(selected_activities)]
 if selected_rooms:
@@ -126,17 +125,10 @@ if len(selected_date_range) == 2:
     df_filtered = df_filtered[(df_filtered["Start Date"] >= start_range) & (df_filtered["End Date"] <= end_range)]
 
 # ---------------------------------------------------
-# Helper Function: Group Status Aggregation
-# ---------------------------------------------------
-def group_status(status_series):
-    statuses = status_series.dropna().astype(str).str.strip().str.lower()
-    return "Finished" if len(statuses) > 0 and all(s == "finished" for s in statuses) else "In Progress"
-
-# ---------------------------------------------------
-# 5. Gantt Chart Generation
+# 5. Gantt Chart Generation Function
 # ---------------------------------------------------
 def create_gantt_chart(df_filtered):
-    # Group by Activity and, if a Room filter is applied, include Room.
+    # Group by Activity and, if a Room filter is applied, by Room.
     group_cols = ["Activity", "Room"] if selected_rooms else ["Activity"]
     agg_df = df_filtered.groupby(group_cols).agg({
         "Start Date": "min",
@@ -177,45 +169,37 @@ def create_gantt_chart(df_filtered):
 gantt_fig = create_gantt_chart(df_filtered)
 
 # ---------------------------------------------------
-# 6. Task Progress Tracker
+# 6. Overall Completion & Progress Bar Calculation
 # ---------------------------------------------------
-# Replacing any blank or missing status with "In Progress" is already done above.
 total_tasks = edited_df.shape[0]
 finished_tasks = edited_df[edited_df["Status"].str.strip().str.lower() == "finished"].shape[0]
 completion_percentage = (finished_tasks / total_tasks) * 100 if total_tasks > 0 else 0
 
-st.subheader("Task Progress Tracker")
-st.metric("Overall Completion", f"{completion_percentage:.1f}%")
+# ---------------------------------------------------
+# 7. Create a Detailed Status Summary
+# ---------------------------------------------------
+def get_status_category(status):
+    s = status.strip().lower()
+    if s == "finished":
+        return "Finished"
+    elif s == "in progress":
+        return "In Progress"
+    else:
+        return "Not Declared"
 
-progress_counts = edited_df["Status"].value_counts().reset_index()
-progress_counts.columns = ["Status", "Count"]
-st.dataframe(progress_counts, use_container_width=True)
-
-# ---------------------------------------------------
-# 7. Workday Summaries (if applicable)
-# ---------------------------------------------------
-st.subheader("Workday Summaries")
-if "Workdays" in edited_df.columns and edited_df["Workdays"].notna().any():
-    workday_summary = edited_df.groupby("Activity")["Workdays"].mean().reset_index()
-    workday_summary.columns = ["Activity", "Average Workdays"]
-    st.dataframe(workday_summary, use_container_width=True)
-else:
-    st.info("No workday information available.")
-
-# ---------------------------------------------------
-# 8. Detailed Data View
-# ---------------------------------------------------
-st.subheader("Detailed Task Information")
-if not df_filtered.empty:
-    st.dataframe(df_filtered[["Activity", "Room", "Item", "Task", "Start Date", "End Date", "Status"]])
-else:
-    st.info("No detailed task data to display based on the current filters.")
+edited_df["Status Category"] = edited_df["Status"].apply(get_status_category)
+status_summary = edited_df.groupby("Status Category").size().reset_index(name="Count")
+# Ensure the order is consistent: Not Declared, In Progress, Finished
+desired_order = ["Not Declared", "In Progress", "Finished"]
+status_summary["Order"] = status_summary["Status Category"].apply(lambda x: desired_order.index(x) if x in desired_order else 99)
+status_summary = status_summary.sort_values("Order").drop("Order", axis=1)
 
 # ---------------------------------------------------
-# 9. Dashboard Layout with Tabs
+# 8. Layout with Tabs: Dashboard, Detailed Summary, Reports
 # ---------------------------------------------------
-tabs = st.tabs(["Dashboard", "Detailed Data", "Reports"])
+tabs = st.tabs(["Dashboard", "Detailed Summary", "Reports"])
 
+# ---------- Dashboard Tab ----------
 with tabs[0]:
     st.header("Dashboard Overview")
     col1, col2 = st.columns(2)
@@ -226,21 +210,24 @@ with tabs[0]:
         st.subheader("Project Timeline")
         st.plotly_chart(gantt_fig, use_container_width=True)
     st.metric("Overall Completion", f"{completion_percentage:.1f}%")
+    st.progress(completion_percentage / 100)
     st.markdown("Use the filters on the sidebar to adjust the view.")
 
+# ---------- Detailed Summary Tab ----------
 with tabs[1]:
-    st.header("Detailed Data")
+    st.header("Detailed Summary")
+    st.markdown("### Task Progress Tracker")
+    st.dataframe(status_summary, use_container_width=True)
+    st.markdown("### Full Detailed Data")
     st.dataframe(df_filtered)
 
+# ---------- Reports Tab ----------
 with tabs[2]:
     st.header("Reports")
-    st.markdown("### Task Status Summary")
-    st.dataframe(progress_counts)
-    st.markdown("### Workday Summaries")
-    if "Workdays" in edited_df.columns and edited_df["Workdays"].notna().any():
-        st.dataframe(workday_summary)
-    else:
-        st.info("No workday information available.")
+    st.markdown("### Task Status Distribution")
+    # Create a pie chart for task status distribution
+    pie_fig = px.pie(edited_df, names="Status Category", title="Task Status Distribution")
+    st.plotly_chart(pie_fig, use_container_width=True)
     st.markdown("### Export Data")
     def convert_df_to_csv(df):
         return df.to_csv(index=False).encode("utf-8")
