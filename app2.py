@@ -11,7 +11,9 @@ from docx import Document
 # ---------------------------------------------------
 st.set_page_config(page_title="Construction Project Manager Dashboard", layout="wide")
 st.title("Construction Project Manager Dashboard")
-st.markdown("This dashboard provides an executive overview of the project—including task snapshots, timeline visualization, and detailed reports. Use the sidebar to filter the data.")
+st.markdown(
+    "This dashboard provides an executive overview of the project—including task snapshots, timeline visualization, and detailed reports. Use the sidebar to filter the data."
+)
 
 # ---------------------------------------------------
 # 1. Data Loading from Excel
@@ -105,20 +107,22 @@ if len(selected_date_range) == 2:
 # 5. Helper Function: Compute Aggregated Status for an Activity
 # ---------------------------------------------------
 def aggregated_status(group_df):
-    # If all tasks are finished, compute finish timing regardless of start date.
+    now = pd.Timestamp(datetime.today().date())
+    # First, check if any task is manually set to "in progress"
+    if any(group_df["Status"].str.strip().str.lower() == "in progress"):
+        return "In Progress"
+    # If all tasks are finished, decide based on end date.
     if all(group_df["Status"].str.strip().str.lower() == "finished"):
-        now = pd.Timestamp(datetime.today().date())
         max_end = group_df["End Date"].dt.normalize().max()
         if now <= max_end:
             return "Finished On Time"
         else:
             return "Finished Late"
-    # Otherwise, if the current date is before the earliest start date, return "Not Started".
-    now = pd.Timestamp(datetime.today().date())
+    # Otherwise, if current date is before the earliest start date, return "Not Started"
     min_start = group_df["Start Date"].dt.normalize().min()
     if now < min_start:
         return "Not Started"
-    # Else, the activity is in progress.
+    # Else, default to "In Progress"
     return "In Progress"
 
 # ---------------------------------------------------
@@ -131,12 +135,12 @@ def create_gantt_chart(df_filtered, color_by_status=False):
             "Start Date": "min",
             "End Date": "max"
         }).reset_index()
-        # Compute the aggregated status per activity.
+        # Compute aggregated status for each activity.
         def compute_activity_status(activity):
             subset = df_filtered[df_filtered["Activity"] == activity]
             return aggregated_status(subset)
         agg_df["Display Status"] = agg_df["Activity"].apply(compute_activity_status)
-        # Custom color mapping.
+        # Define custom color mapping.
         color_discrete_map = {
             "Not Started": "lightgray",
             "In Progress": "blue",
@@ -154,7 +158,7 @@ def create_gantt_chart(df_filtered, color_by_status=False):
         )
         fig.update_layout(yaxis_title="Activity")
     else:
-        # Use the aggregated view by Activity (or Activity+Room) colored by Activity.
+        # Use the original aggregated view by Activity (or Activity+Room) colored by Activity.
         group_cols = ["Activity", "Room"] if selected_rooms else ["Activity"]
         agg_df = df_filtered.groupby(group_cols).agg({
             "Start Date": "min",
@@ -392,7 +396,7 @@ with tabs[2]:
     
     st.markdown("---")
     
-    # Additional Templates Section
+    # Additional Templates Section (Example: Work Order Template)
     st.markdown("### Additional Templates")
     template_choice = st.selectbox("Select Template to Generate", options=[
         "Work Order Template",
@@ -442,7 +446,6 @@ with tabs[2]:
                     file_name="Work_Order_Document.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
-    # (Additional template forms for Risk Register, RFQ, etc. can be added similarly.)
     
     st.markdown("---")
     st.markdown("### Export Data")
@@ -457,6 +460,6 @@ with tabs[2]:
     st.download_button(label="Download Filtered Data as CSV", data=csv_data, file_name="filtered_construction_data.csv", mime="text/csv")
     excel_data = convert_df_to_excel(df_filtered)
     st.download_button(label="Download Filtered Data as Excel", data=excel_data, file_name="filtered_construction_data.xlsx", mime="application/vnd.ms-excel")
-
+    
 st.markdown("---")
 st.markdown("Developed with a forward-thinking, data-driven approach. Enjoy tracking your construction project!")
