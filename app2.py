@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 import io
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from docx import Document
 from docx.shared import Inches
 
@@ -86,6 +86,9 @@ else:
 
 show_finished = st.sidebar.checkbox("Show Finished Tasks", value=True)
 
+# NEW: Toggle for color-coding Gantt chart by task status
+color_by_status = st.sidebar.checkbox("Color-code Gantt Chart by Task Status", value=True)
+
 min_date = edited_df["Start Date"].min()
 max_date = edited_df["End Date"].max()
 selected_date_range = st.sidebar.date_input("Select Date Range", value=[min_date, max_date])
@@ -110,43 +113,93 @@ if len(selected_date_range) == 2:
 # ---------------------------------------------------
 # 5. Gantt Chart Generation
 # ---------------------------------------------------
-def create_gantt_chart(df_filtered):
-    group_cols = ["Activity", "Room"] if selected_rooms else ["Activity"]
-    agg_df = df_filtered.groupby(group_cols).agg({
-        "Start Date": "min",
-        "End Date": "max",
-        "Task": lambda x: ", ".join(sorted(set(x.dropna()))),
-        "Item": lambda x: ", ".join(sorted(set(x.dropna())))
-    }).reset_index()
-    agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
-    if "Room" in group_cols:
-        agg_df["Activity_Room"] = agg_df["Activity"] + " (" + agg_df["Room"] + ")"
+def create_gantt_chart(df_filtered, color_by_status=False):
+    if color_by_status:
+        # Build an individual task view with color-coding based on task status and dates.
+        now = pd.Timestamp(datetime.today().date())
+        df_status = df_filtered.copy()
+        def compute_display_status(row):
+            st_val = row["Status"].strip().lower()
+            if st_val == "finished":
+                # If End Date exists, decide based on current date
+                if pd.notnull(row["End Date"]) and now <= row["End Date"]:
+                    return "Finished On Time"
+                else:
+                    return "Finished Late"
+            elif st_val == "in progress":
+                return "In Progress"
+            else:
+                # No valid status provided – use start date to decide:
+                if pd.notnull(row["Start Date"]):
+                    if now < row["Start Date"]:
+                        return "Not Started"
+                    else:
+                        return "Should Have Started"
+                else:
+                    return "Not Declared"
+        df_status["Display Status"] = df_status.apply(compute_display_status, axis=1)
+        # Combine Activity and Task for the y-axis label
+        df_status["Activity_Task"] = df_status["Activity"] + " - " + df_status["Task"]
         fig = px.timeline(
-            agg_df,
+            df_status,
             x_start="Start Date",
             x_end="End Date",
-            y="Activity_Room",
-            color="Activity",
-            hover_data=["Items", "Tasks"],
-            title="Activity & Room Timeline"
+            y="Activity_Task",
+            color="Display Status",
+            hover_data=["Room", "Item", "Status"],
+            title="Gantt Chart (Color-coded by Task Status)"
         )
-        fig.update_layout(yaxis_title="Activity (Room)")
+        # Define a custom color mapping:
+        color_map = {
+            "Not Started": "lightgray",
+            "Should Have Started": "red",
+            "In Progress": "blue",
+            "Finished On Time": "green",
+            "Finished Late": "orange",
+            "Not Declared": "gray"
+        }
+        # Note: Plotly Express may not let you directly override the colors;
+        # one workaround is to update the trace marker colors if needed.
+        fig.update_traces(marker=dict(color=df_status["Display Status"].map(color_map)))
+        fig.update_layout(legend_title="Task Status")
     else:
-        fig = px.timeline(
-            agg_df,
-            x_start="Start Date",
-            x_end="End Date",
-            y="Activity",
-            color="Activity",
-            hover_data=["Items", "Tasks"],
-            title="Activity Timeline"
-        )
-        fig.update_layout(yaxis_title="Activity")
+        # Use the aggregated view by Activity (or Activity + Room) with color by Activity.
+        group_cols = ["Activity", "Room"] if selected_rooms else ["Activity"]
+        agg_df = df_filtered.groupby(group_cols).agg({
+            "Start Date": "min",
+            "End Date": "max",
+            "Task": lambda x: ", ".join(sorted(set(x.dropna()))),
+            "Item": lambda x: ", ".join(sorted(set(x.dropna())))
+        }).reset_index()
+        agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
+        if "Room" in group_cols:
+            agg_df["Activity_Room"] = agg_df["Activity"] + " (" + agg_df["Room"] + ")"
+            fig = px.timeline(
+                agg_df,
+                x_start="Start Date",
+                x_end="End Date",
+                y="Activity_Room",
+                color="Activity",
+                hover_data=["Items", "Tasks"],
+                title="Activity & Room Timeline"
+            )
+            fig.update_layout(yaxis_title="Activity (Room)")
+        else:
+            fig = px.timeline(
+                agg_df,
+                x_start="Start Date",
+                x_end="End Date",
+                y="Activity",
+                color="Activity",
+                hover_data=["Items", "Tasks"],
+                title="Activity Timeline"
+            )
+            fig.update_layout(yaxis_title="Activity")
     fig.update_yaxes(autorange="reversed")
     fig.update_layout(xaxis_title="Timeline")
     return fig
 
-gantt_fig = create_gantt_chart(df_filtered)
+gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status)
 
 # ---------------------------------------------------
 # 6. Overall Completion & Progress Bar Calculation
@@ -166,7 +219,6 @@ def get_status_category(status):
         return "In Progress"
     else:
         return "Not Declared"
-
 edited_df["Status Category"] = edited_df["Status"].apply(get_status_category)
 status_summary = edited_df.groupby("Status Category").size().reset_index(name="Count")
 desired_order = ["Not Declared", "In Progress", "Finished"]
@@ -177,8 +229,7 @@ status_summary = status_summary.sort_values("Order").drop("Order", axis=1)
 # 8. Additional Dashboard Features
 # ---------------------------------------------------
 today = pd.Timestamp(datetime.today().date())
-
-# Overdue Tasks: Tasks with End Date before today and not Finished
+# Overdue Tasks: Tasks with End Date before today and not finished
 overdue_df = df_filtered[(df_filtered["End Date"] < today) &
                          (df_filtered["Status"].str.strip().str.lower() != "finished")]
 overdue_count = overdue_df.shape[0]
@@ -204,13 +255,13 @@ if selected_date_range:
     filter_summary.append(f"Date Range: {selected_date_range[0]} to {selected_date_range[1]}")
 filter_summary_text = "; ".join(filter_summary) if filter_summary else "No filters applied."
 
-# KPI Widgets: Additional metrics
+# Additional KPI Widgets
 tasks_in_progress = edited_df[edited_df["Status"].str.strip().str.lower() == "in progress"].shape[0]
 not_declared = edited_df[~edited_df["Status"].str.strip().str.lower().isin(["finished", "in progress"])].shape[0]
 
 # Task Comments/Notes Panel: Tasks with non-empty Notes
 notes_df = df_filtered[df_filtered["Notes"].notna() & (df_filtered["Notes"].str.strip() != "")]
-    
+
 # ---------------------------------------------------
 # 9. Layout with Tabs: Dashboard, Detailed Summary, Reports
 # ---------------------------------------------------
@@ -219,8 +270,6 @@ tabs = st.tabs(["Dashboard", "Detailed Summary", "Reports"])
 # ---------- Dashboard Tab ----------
 with tabs[0]:
     st.header("Dashboard Overview")
-    
-    # Original side-by-side view
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Current Tasks Snapshot")
@@ -232,35 +281,28 @@ with tabs[0]:
     st.progress(completion_percentage / 100)
     
     st.markdown("#### Additional Insights")
-    
-    # Overdue Tasks Indicator
     st.markdown(f"**Overdue Tasks:** {overdue_count}")
     if not overdue_df.empty:
         st.dataframe(overdue_df[["Activity", "Room", "Task", "Status", "End Date"]])
     
-    # Task Distribution Summary
     st.markdown("**Task Distribution by Activity:**")
     st.plotly_chart(dist_fig, use_container_width=True)
     
-    # Upcoming Tasks
     st.markdown("**Upcoming Tasks (Next 7 Days):**")
     if not upcoming_df.empty:
         st.dataframe(upcoming_df[["Activity", "Room", "Task", "Start Date", "Status"]])
     else:
         st.info("No upcoming tasks in the next 7 days.")
     
-    # Filter Summary Panel
     st.markdown("**Active Filters:**")
     st.write(filter_summary_text)
     
-    # Additional KPI Widgets
     col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
     col_kpi1.metric("Total Tasks", total_tasks)
     col_kpi2.metric("In Progress", tasks_in_progress)
     col_kpi3.metric("Finished", finished_tasks)
     col_kpi4.metric("Not Declared", not_declared)
     
-    # Task Comments/Notes Panel
     st.markdown("**Task Comments/Notes:**")
     if not notes_df.empty:
         st.dataframe(notes_df[["Activity", "Room", "Task", "Notes"]])
@@ -318,7 +360,7 @@ with tabs[2]:
     
     st.markdown("---")
     
-    # Change Order Template Section (as before)
+    # Change Order Template Section
     st.markdown("### Change Order Template")
     with st.form("change_order_form"):
         change_order_number = st.text_input("Change Order Number")
@@ -381,7 +423,6 @@ with tabs[2]:
         "Roofing Estimate Template"
     ])
     
-    # Each additional template has its own form and corresponding document generation function
     if template_choice == "Work Order Template":
         with st.form("work_order_form"):
             work_order_number = st.text_input("Work Order Number")
@@ -639,6 +680,6 @@ with tabs[2]:
     st.download_button(label="Download Filtered Data as CSV", data=csv_data, file_name="filtered_construction_data.csv", mime="text/csv")
     excel_data = convert_df_to_excel(df_filtered)
     st.download_button(label="Download Filtered Data as Excel", data=excel_data, file_name="filtered_construction_data.xlsx", mime="application/vnd.ms-excel")
-    
+
 st.markdown("---")
 st.markdown("Developed with a forward-thinking, data-driven approach. Enjoy tracking your construction project!")
