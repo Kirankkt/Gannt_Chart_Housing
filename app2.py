@@ -104,7 +104,150 @@ if len(selected_date_range) == 2:
     df_filtered = df_filtered[(df_filtered["Start Date"] >= start_range) & (df_filtered["End Date"] <= end_range)]
 
 # ---------------------------------------------------
-# 5. Additional Template Functions
+# 5. Helper Function: Compute Aggregated Status for an Activity
+# ---------------------------------------------------
+def aggregated_status(group_df):
+    now = pd.Timestamp(datetime.today().date())
+    # First, if any task is manually set to "in progress", return "In Progress"
+    if any(group_df["Status"].str.strip().str.lower() == "in progress"):
+        return "In Progress"
+    # If all tasks are finished, decide based on the latest end date.
+    if all(group_df["Status"].str.strip().str.lower() == "finished"):
+        max_end = group_df["End Date"].dt.normalize().max()
+        if now <= max_end:
+            return "Finished On Time"
+        else:
+            return "Finished Late"
+    # Otherwise, if today is before the earliest start date, return "Not Started"
+    min_start = group_df["Start Date"].dt.normalize().min()
+    if now < min_start:
+        return "Not Started"
+    # Else, default to "In Progress"
+    return "In Progress"
+
+# ---------------------------------------------------
+# 6. Gantt Chart Generation
+# ---------------------------------------------------
+def create_gantt_chart(df_filtered, color_by_status=False):
+    if color_by_status:
+        # Aggregate by Activity only.
+        agg_df = df_filtered.groupby("Activity").agg({
+            "Start Date": "min",
+            "End Date": "max"
+        }).reset_index()
+        # Compute the aggregated status per activity.
+        def compute_activity_status(activity):
+            subset = df_filtered[df_filtered["Activity"] == activity]
+            return aggregated_status(subset)
+        agg_df["Display Status"] = agg_df["Activity"].apply(compute_activity_status)
+        # Define custom color mapping.
+        color_discrete_map = {
+            "Not Started": "lightgray",
+            "In Progress": "blue",
+            "Finished On Time": "green",
+            "Finished Late": "orange"
+        }
+        fig = px.timeline(
+            agg_df,
+            x_start="Start Date",
+            x_end="End Date",
+            y="Activity",
+            color="Display Status",
+            color_discrete_map=color_discrete_map,
+            title="Activity Timeline (Color-coded by Status)"
+        )
+        fig.update_layout(yaxis_title="Activity")
+    else:
+        # Use the original aggregated view (by Activity or Activity+Room) colored by Activity.
+        group_cols = ["Activity", "Room"] if selected_rooms else ["Activity"]
+        agg_df = df_filtered.groupby(group_cols).agg({
+            "Start Date": "min",
+            "End Date": "max",
+            "Task": lambda x: ", ".join(sorted(set(x.dropna()))),
+            "Item": lambda x: ", ".join(sorted(set(x.dropna())))
+        }).reset_index()
+        agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
+        if "Room" in group_cols:
+            agg_df["Activity_Room"] = agg_df["Activity"] + " (" + agg_df["Room"] + ")"
+            fig = px.timeline(
+                agg_df,
+                x_start="Start Date",
+                x_end="End Date",
+                y="Activity_Room",
+                color="Activity",
+                hover_data=["Items", "Tasks"],
+                title="Activity & Room Timeline"
+            )
+            fig.update_layout(yaxis_title="Activity (Room)")
+        else:
+            fig = px.timeline(
+                agg_df,
+                x_start="Start Date",
+                x_end="End Date",
+                y="Activity",
+                color="Activity",
+                hover_data=["Items", "Tasks"],
+                title="Activity Timeline"
+            )
+            fig.update_layout(yaxis_title="Activity")
+    fig.update_yaxes(autorange="reversed")
+    fig.update_layout(xaxis_title="Timeline")
+    return fig
+
+gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status)
+
+# ---------------------------------------------------
+# 7. Overall Completion & Progress Bar Calculation
+# ---------------------------------------------------
+total_tasks = edited_df.shape[0]
+finished_tasks = edited_df[edited_df["Status"].str.strip().str.lower() == "finished"].shape[0]
+completion_percentage = (finished_tasks / total_tasks) * 100 if total_tasks > 0 else 0
+
+# ---------------------------------------------------
+# 8. Detailed Status Summary (for Detailed Summary Tab)
+# ---------------------------------------------------
+def get_status_category(status):
+    s = status.strip().lower()
+    if s == "finished":
+        return "Finished"
+    elif s == "in progress":
+        return "In Progress"
+    else:
+        return "Not Declared"
+edited_df["Status Category"] = edited_df["Status"].apply(get_status_category)
+status_summary = edited_df.groupby("Status Category").size().reset_index(name="Count")
+desired_order = ["Not Declared", "In Progress", "Finished"]
+status_summary["Order"] = status_summary["Status Category"].apply(lambda x: desired_order.index(x) if x in desired_order else 99)
+status_summary = status_summary.sort_values("Order").drop("Order", axis=1)
+
+# ---------------------------------------------------
+# 9. Additional Dashboard Features
+# ---------------------------------------------------
+today = pd.Timestamp(datetime.today().date())
+overdue_df = df_filtered[(df_filtered["End Date"] < today) &
+                         (df_filtered["Status"].str.strip().str.lower() != "finished")]
+overdue_count = overdue_df.shape[0]
+task_distribution = df_filtered.groupby("Activity").size().reset_index(name="Task Count")
+dist_fig = px.bar(task_distribution, x="Activity", y="Task Count", title="Task Distribution by Activity")
+upcoming_start = today
+upcoming_end = today + pd.Timedelta(days=7)
+upcoming_df = df_filtered[(df_filtered["Start Date"] >= upcoming_start) & (df_filtered["Start Date"] <= upcoming_end)]
+filter_summary = []
+if selected_activities:
+    filter_summary.append("Activities: " + ", ".join(selected_activities))
+if selected_rooms:
+    filter_summary.append("Rooms: " + ", ".join(selected_rooms))
+if selected_statuses:
+    filter_summary.append("Status: " + ", ".join(selected_statuses))
+if selected_date_range:
+    filter_summary.append(f"Date Range: {selected_date_range[0]} to {selected_date_range[1]}")
+filter_summary_text = "; ".join(filter_summary) if filter_summary else "No filters applied."
+tasks_in_progress = edited_df[edited_df["Status"].str.strip().str.lower() == "in progress"].shape[0]
+not_declared = edited_df[~edited_df["Status"].str.strip().str.lower().isin(["finished", "in progress"])].shape[0]
+notes_df = df_filtered[df_filtered["Notes"].notna() & (df_filtered["Notes"].str.strip() != "")]
+
+# ---------------------------------------------------
+# 10. Additional Template Functions (for Reports)
 # ---------------------------------------------------
 def generate_work_order_report(form_data):
     doc = Document()
@@ -240,11 +383,10 @@ def generate_roofing_estimate_report(form_data):
     return f.getvalue()
 
 # ---------------------------------------------------
-# 6. Gantt Chart Generation (Aggregated by Activity)
+# 10. Gantt Chart Generation (Aggregated by Activity)
 # ---------------------------------------------------
 def create_gantt_chart(df_filtered, color_by_status=False):
     if color_by_status:
-        # Aggregate by Activity only.
         agg_df = df_filtered.groupby("Activity").agg({
             "Start Date": "min",
             "End Date": "max"
@@ -308,14 +450,14 @@ def create_gantt_chart(df_filtered, color_by_status=False):
 gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status)
 
 # ---------------------------------------------------
-# 7. Overall Completion & Progress Bar Calculation
+# 11. Overall Completion & Progress Bar Calculation
 # ---------------------------------------------------
 total_tasks = edited_df.shape[0]
 finished_tasks = edited_df[edited_df["Status"].str.strip().str.lower() == "finished"].shape[0]
 completion_percentage = (finished_tasks / total_tasks) * 100 if total_tasks > 0 else 0
 
 # ---------------------------------------------------
-# 8. Detailed Status Summary (for Detailed Summary Tab)
+# 12. Detailed Status Summary (for Detailed Summary Tab)
 # ---------------------------------------------------
 def get_status_category(status):
     s = status.strip().lower()
@@ -332,7 +474,7 @@ status_summary["Order"] = status_summary["Status Category"].apply(lambda x: desi
 status_summary = status_summary.sort_values("Order").drop("Order", axis=1)
 
 # ---------------------------------------------------
-# 9. Additional Dashboard Features
+# 13. Additional Dashboard Features
 # ---------------------------------------------------
 today = pd.Timestamp(datetime.today().date())
 overdue_df = df_filtered[(df_filtered["End Date"] < today) &
@@ -358,7 +500,7 @@ not_declared = edited_df[~edited_df["Status"].str.strip().str.lower().isin(["fin
 notes_df = df_filtered[df_filtered["Notes"].notna() & (df_filtered["Notes"].str.strip() != "")]
 
 # ---------------------------------------------------
-# 10. Layout with Tabs: Dashboard, Detailed Summary, Reports
+# 14. Layout with Tabs: Dashboard, Detailed Summary, Reports
 # ---------------------------------------------------
 tabs = st.tabs(["Dashboard", "Detailed Summary", "Reports"])
 
