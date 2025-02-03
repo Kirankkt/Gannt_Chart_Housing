@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 import io
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from docx import Document
 from docx.shared import Inches
 
@@ -53,7 +53,6 @@ column_config = {
     )
 }
 edited_df = st.data_editor(df, column_config=column_config, use_container_width=True)
-
 # Replace blank or missing statuses with "In Progress"
 edited_df["Status"] = edited_df["Status"].fillna("In Progress").replace("", "In Progress")
 
@@ -120,7 +119,6 @@ def create_gantt_chart(df_filtered):
         "Item": lambda x: ", ".join(sorted(set(x.dropna())))
     }).reset_index()
     agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
-    
     if "Room" in group_cols:
         agg_df["Activity_Room"] = agg_df["Activity"] + " (" + agg_df["Room"] + ")"
         fig = px.timeline(
@@ -144,7 +142,6 @@ def create_gantt_chart(df_filtered):
             title="Activity Timeline"
         )
         fig.update_layout(yaxis_title="Activity")
-    
     fig.update_yaxes(autorange="reversed")
     fig.update_layout(xaxis_title="Timeline")
     return fig
@@ -177,131 +174,43 @@ status_summary["Order"] = status_summary["Status Category"].apply(lambda x: desi
 status_summary = status_summary.sort_values("Order").drop("Order", axis=1)
 
 # ---------------------------------------------------
-# 8. Additional Templates Functions (Generate Word Documents)
+# 8. Additional Dashboard Features
 # ---------------------------------------------------
-def generate_work_order_report(form_data):
-    doc = Document()
-    doc.add_heading("Work Order", 0)
-    doc.add_paragraph(f"Work Order Number: {form_data.get('work_order_number','')}")
-    doc.add_paragraph(f"Contractor: {form_data.get('contractor','')}")
-    doc.add_paragraph(f"Description: {form_data.get('description','')}")
-    doc.add_paragraph(f"Assigned Tasks: {form_data.get('tasks','')}")
-    doc.add_paragraph(f"Due Date: {form_data.get('due_date','')}")
-    f = io.BytesIO()
-    doc.save(f)
-    return f.getvalue()
+today = pd.Timestamp(datetime.today().date())
 
-def generate_risk_register_report(form_data):
-    doc = Document()
-    doc.add_heading("Risk Register", 0)
-    doc.add_paragraph(f"Risk ID: {form_data.get('risk_id','')}")
-    doc.add_paragraph(f"Risk Description: {form_data.get('description','')}")
-    doc.add_paragraph(f"Impact: {form_data.get('impact','')}")
-    doc.add_paragraph(f"Likelihood: {form_data.get('likelihood','')}")
-    doc.add_paragraph(f"Mitigation Plan: {form_data.get('mitigation','')}")
-    f = io.BytesIO()
-    doc.save(f)
-    return f.getvalue()
+# Overdue Tasks: Tasks with End Date before today and not Finished
+overdue_df = df_filtered[(df_filtered["End Date"] < today) &
+                         (df_filtered["Status"].str.strip().str.lower() != "finished")]
+overdue_count = overdue_df.shape[0]
 
-def generate_rfq_report(form_data):
-    doc = Document()
-    doc.add_heading("Request for Quote (RFQ)", 0)
-    doc.add_paragraph(f"Quotation Number: {form_data.get('quotation_number','')}")
-    doc.add_paragraph(f"Customer ID: {form_data.get('customer_id','')}")
-    doc.add_paragraph(f"Company Name: {form_data.get('company_name','')}")
-    doc.add_paragraph(f"Requested Items/Services: {form_data.get('requested','')}")
-    doc.add_paragraph(f"Quote Validity (days): {form_data.get('validity','')}")
-    f = io.BytesIO()
-    doc.save(f)
-    return f.getvalue()
+# Task Distribution Summary: Count tasks per Activity
+task_distribution = df_filtered.groupby("Activity").size().reset_index(name="Task Count")
+dist_fig = px.bar(task_distribution, x="Activity", y="Task Count", title="Task Distribution by Activity")
 
-def generate_rfp_report(form_data):
-    doc = Document()
-    doc.add_heading("Request for Proposal (RFP)", 0)
-    doc.add_paragraph(f"RFP Number: {form_data.get('rfp_number','')}")
-    doc.add_paragraph(f"Project Background: {form_data.get('background','')}")
-    doc.add_paragraph(f"Scope of Work: {form_data.get('scope','')}")
-    doc.add_paragraph(f"Timeline: {form_data.get('timeline','')}")
-    doc.add_paragraph(f"Submission Deadline: {form_data.get('deadline','')}")
-    f = io.BytesIO()
-    doc.save(f)
-    return f.getvalue()
+# Upcoming Tasks: Tasks with Start Date within next 7 days
+upcoming_start = today
+upcoming_end = today + pd.Timedelta(days=7)
+upcoming_df = df_filtered[(df_filtered["Start Date"] >= upcoming_start) & (df_filtered["Start Date"] <= upcoming_end)]
 
-def generate_rfi_report(form_data):
-    doc = Document()
-    doc.add_heading("Request for Information (RFI)", 0)
-    doc.add_paragraph(f"RFI Number: {form_data.get('rfi_number','')}")
-    doc.add_paragraph(f"Subject: {form_data.get('subject','')}")
-    doc.add_paragraph(f"Question: {form_data.get('question','')}")
-    doc.add_paragraph(f"Requested Response Date: {form_data.get('response_date','')}")
-    f = io.BytesIO()
-    doc.save(f)
-    return f.getvalue()
+# Filter Summary Panel: Show active filters as text
+filter_summary = []
+if selected_activities:
+    filter_summary.append("Activities: " + ", ".join(selected_activities))
+if selected_rooms:
+    filter_summary.append("Rooms: " + ", ".join(selected_rooms))
+if selected_statuses:
+    filter_summary.append("Status: " + ", ".join(selected_statuses))
+if selected_date_range:
+    filter_summary.append(f"Date Range: {selected_date_range[0]} to {selected_date_range[1]}")
+filter_summary_text = "; ".join(filter_summary) if filter_summary else "No filters applied."
 
-def generate_schedule_of_values_report(form_data):
-    doc = Document()
-    doc.add_heading("Schedule of Values", 0)
-    doc.add_paragraph(f"Project: {form_data.get('project','')}")
-    doc.add_paragraph(f"Total Contract Amount: {form_data.get('total_amount','')}")
-    doc.add_paragraph("Task Breakdown:")
-    doc.add_paragraph(form_data.get("breakdown",""))
-    f = io.BytesIO()
-    doc.save(f)
-    return f.getvalue()
+# KPI Widgets: Additional metrics
+tasks_in_progress = edited_df[edited_df["Status"].str.strip().str.lower() == "in progress"].shape[0]
+not_declared = edited_df[~edited_df["Status"].str.strip().str.lower().isin(["finished", "in progress"])].shape[0]
 
-def generate_contractor_estimate_report(form_data):
-    doc = Document()
-    doc.add_heading("Contractor Estimate", 0)
-    doc.add_paragraph(f"Estimate Number: {form_data.get('estimate_number','')}")
-    doc.add_paragraph(f"Project: {form_data.get('project','')}")
-    doc.add_paragraph(f"Estimated Material Costs: {form_data.get('material_costs','')}")
-    doc.add_paragraph(f"Estimated Labor Costs: {form_data.get('labor_costs','')}")
-    f = io.BytesIO()
-    doc.save(f)
-    return f.getvalue()
-
-def generate_construction_quote_report(form_data):
-    doc = Document()
-    doc.add_heading("Construction Quote", 0)
-    doc.add_paragraph(f"Quote Number: {form_data.get('quote_number','')}")
-    doc.add_paragraph(f"Project: {form_data.get('project','')}")
-    doc.add_paragraph(f"Estimated Total Cost: {form_data.get('total_cost','')}")
-    f = io.BytesIO()
-    doc.save(f)
-    return f.getvalue()
-
-def generate_scope_of_work_report(form_data):
-    doc = Document()
-    doc.add_heading("Scope of Work", 0)
-    doc.add_paragraph(f"Project Name: {form_data.get('project_name','')}")
-    doc.add_paragraph(f"Scope Details: {form_data.get('scope_details','')}")
-    doc.add_paragraph(f"Milestones: {form_data.get('milestones','')}")
-    f = io.BytesIO()
-    doc.save(f)
-    return f.getvalue()
-
-def generate_painting_estimate_report(form_data):
-    doc = Document()
-    doc.add_heading("Painting Estimate", 0)
-    doc.add_paragraph(f"Estimate Number: {form_data.get('estimate_number','')}")
-    doc.add_paragraph(f"Project/Location: {form_data.get('project','')}")
-    doc.add_paragraph(f"Estimated Material Costs: {form_data.get('material_costs','')}")
-    doc.add_paragraph(f"Estimated Labor Costs: {form_data.get('labor_costs','')}")
-    f = io.BytesIO()
-    doc.save(f)
-    return f.getvalue()
-
-def generate_roofing_estimate_report(form_data):
-    doc = Document()
-    doc.add_heading("Roofing Estimate", 0)
-    doc.add_paragraph(f"Estimate Number: {form_data.get('estimate_number','')}")
-    doc.add_paragraph(f"Total Area (sq ft): {form_data.get('area','')}")
-    doc.add_paragraph(f"Material Specification: {form_data.get('materials','')}")
-    doc.add_paragraph(f"Estimated Cost: {form_data.get('estimated_cost','')}")
-    f = io.BytesIO()
-    doc.save(f)
-    return f.getvalue()
-
+# Task Comments/Notes Panel: Tasks with non-empty Notes
+notes_df = df_filtered[df_filtered["Notes"].notna() & (df_filtered["Notes"].str.strip() != "")]
+    
 # ---------------------------------------------------
 # 9. Layout with Tabs: Dashboard, Detailed Summary, Reports
 # ---------------------------------------------------
@@ -310,6 +219,8 @@ tabs = st.tabs(["Dashboard", "Detailed Summary", "Reports"])
 # ---------- Dashboard Tab ----------
 with tabs[0]:
     st.header("Dashboard Overview")
+    
+    # Original side-by-side view
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Current Tasks Snapshot")
@@ -319,8 +230,45 @@ with tabs[0]:
         st.plotly_chart(gantt_fig, use_container_width=True)
     st.metric("Overall Completion", f"{completion_percentage:.1f}%")
     st.progress(completion_percentage / 100)
+    
+    st.markdown("#### Additional Insights")
+    
+    # Overdue Tasks Indicator
+    st.markdown(f"**Overdue Tasks:** {overdue_count}")
+    if not overdue_df.empty:
+        st.dataframe(overdue_df[["Activity", "Room", "Task", "Status", "End Date"]])
+    
+    # Task Distribution Summary
+    st.markdown("**Task Distribution by Activity:**")
+    st.plotly_chart(dist_fig, use_container_width=True)
+    
+    # Upcoming Tasks
+    st.markdown("**Upcoming Tasks (Next 7 Days):**")
+    if not upcoming_df.empty:
+        st.dataframe(upcoming_df[["Activity", "Room", "Task", "Start Date", "Status"]])
+    else:
+        st.info("No upcoming tasks in the next 7 days.")
+    
+    # Filter Summary Panel
+    st.markdown("**Active Filters:**")
+    st.write(filter_summary_text)
+    
+    # Additional KPI Widgets
+    col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
+    col_kpi1.metric("Total Tasks", total_tasks)
+    col_kpi2.metric("In Progress", tasks_in_progress)
+    col_kpi3.metric("Finished", finished_tasks)
+    col_kpi4.metric("Not Declared", not_declared)
+    
+    # Task Comments/Notes Panel
+    st.markdown("**Task Comments/Notes:**")
+    if not notes_df.empty:
+        st.dataframe(notes_df[["Activity", "Room", "Task", "Notes"]])
+    else:
+        st.info("No additional comments or notes.")
+    
     st.markdown("Use the filters on the sidebar to adjust the view.")
-
+    
 # ---------- Detailed Summary Tab ----------
 with tabs[1]:
     st.header("Detailed Summary")
@@ -328,12 +276,12 @@ with tabs[1]:
     st.dataframe(status_summary, use_container_width=True)
     st.markdown("### Full Detailed Data")
     st.dataframe(df_filtered)
-
+    
 # ---------- Reports Tab ----------
 with tabs[2]:
     st.header("Reports")
     
-    # --- Construction Daily Report (existing) ---
+    # Construction Daily Report Section
     st.markdown("### Construction Daily Report")
     def generate_daily_report(df):
         document = Document()
@@ -370,7 +318,7 @@ with tabs[2]:
     
     st.markdown("---")
     
-    # --- Change Order Template (existing) ---
+    # Change Order Template Section (as before)
     st.markdown("### Change Order Template")
     with st.form("change_order_form"):
         change_order_number = st.text_input("Change Order Number")
@@ -393,8 +341,6 @@ with tabs[2]:
                 "estimated_cost_impact": estimated_cost_impact,
                 "approval": approval
             }
-            change_order_doc = generate_change_order_report(form_data) if 'generate_change_order_report' in globals() else None
-            # We can re-use the following simple pattern for Change Order if needed:
             doc = Document()
             doc.add_heading("Change Order", 0)
             doc.add_paragraph(f"Change Order Number: {form_data['change_order_number']}")
@@ -419,7 +365,7 @@ with tabs[2]:
     
     st.markdown("---")
     
-    # --- Additional Templates Section ---
+    # Additional Templates Section
     st.markdown("### Additional Templates")
     template_choice = st.selectbox("Select Template to Generate", options=[
         "Work Order Template",
@@ -435,6 +381,7 @@ with tabs[2]:
         "Roofing Estimate Template"
     ])
     
+    # Each additional template has its own form and corresponding document generation function
     if template_choice == "Work Order Template":
         with st.form("work_order_form"):
             work_order_number = st.text_input("Work Order Number")
@@ -694,4 +641,4 @@ with tabs[2]:
     st.download_button(label="Download Filtered Data as Excel", data=excel_data, file_name="filtered_construction_data.xlsx", mime="application/vnd.ms-excel")
     
 st.markdown("---")
-st.markdown("Data driven approach to Construction Project Management.")
+st.markdown("Developed with a forward-thinking, data-driven approach. Enjoy tracking your construction project!")
