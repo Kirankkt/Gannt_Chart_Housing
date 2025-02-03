@@ -104,29 +104,143 @@ if len(selected_date_range) == 2:
     df_filtered = df_filtered[(df_filtered["Start Date"] >= start_range) & (df_filtered["End Date"] <= end_range)]
 
 # ---------------------------------------------------
-# 5. Helper Function: Compute Aggregated Status for an Activity
+# 5. Additional Template Functions
 # ---------------------------------------------------
-def aggregated_status(group_df):
-    now = pd.Timestamp(datetime.today().date())
-    # First, check if any task is manually set to "in progress"
-    if any(group_df["Status"].str.strip().str.lower() == "in progress"):
-        return "In Progress"
-    # If all tasks are finished, decide based on end date.
-    if all(group_df["Status"].str.strip().str.lower() == "finished"):
-        max_end = group_df["End Date"].dt.normalize().max()
-        if now <= max_end:
-            return "Finished On Time"
-        else:
-            return "Finished Late"
-    # Otherwise, if current date is before the earliest start date, return "Not Started"
-    min_start = group_df["Start Date"].dt.normalize().min()
-    if now < min_start:
-        return "Not Started"
-    # Else, default to "In Progress"
-    return "In Progress"
+def generate_work_order_report(form_data):
+    doc = Document()
+    doc.add_heading("Work Order", 0)
+    doc.add_paragraph(f"Work Order Number: {form_data.get('work_order_number', '')}")
+    doc.add_paragraph(f"Contractor: {form_data.get('contractor', '')}")
+    doc.add_heading("Work Description", level=1)
+    doc.add_paragraph(form_data.get("description", ""))
+    doc.add_heading("Assigned Tasks", level=1)
+    doc.add_paragraph(form_data.get("tasks", ""))
+    doc.add_paragraph(f"Due Date: {form_data.get('due_date', '')}")
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_risk_register_report(form_data):
+    doc = Document()
+    doc.add_heading("Risk Register", 0)
+    doc.add_paragraph(f"Risk ID: {form_data.get('risk_id', '')}")
+    doc.add_heading("Risk Description", level=1)
+    doc.add_paragraph(form_data.get("description", ""))
+    doc.add_paragraph(f"Impact: {form_data.get('impact', '')}")
+    doc.add_paragraph(f"Likelihood: {form_data.get('likelihood', '')}")
+    doc.add_heading("Mitigation Plan", level=1)
+    doc.add_paragraph(form_data.get("mitigation", ""))
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_rfq_report(form_data):
+    doc = Document()
+    doc.add_heading("Request for Quote (RFQ)", 0)
+    doc.add_paragraph(f"Quotation Number: {form_data.get('quotation_number', '')}")
+    doc.add_paragraph(f"Customer ID: {form_data.get('customer_id', '')}")
+    doc.add_paragraph(f"Company Name: {form_data.get('company_name', '')}")
+    doc.add_heading("Requested Items/Services", level=1)
+    doc.add_paragraph(form_data.get("requested", ""))
+    doc.add_paragraph(f"Quote Validity (days): {form_data.get('validity', '')}")
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_rfp_report(form_data):
+    doc = Document()
+    doc.add_heading("Request for Proposal (RFP)", 0)
+    doc.add_paragraph(f"RFP Number: {form_data.get('rfp_number', '')}")
+    doc.add_heading("Project Background", level=1)
+    doc.add_paragraph(form_data.get("background", ""))
+    doc.add_heading("Scope of Work", level=1)
+    doc.add_paragraph(form_data.get("scope", ""))
+    doc.add_paragraph(f"Timeline: {form_data.get('timeline', '')}")
+    doc.add_paragraph(f"Submission Deadline: {form_data.get('deadline', '')}")
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_rfi_report(form_data):
+    doc = Document()
+    doc.add_heading("Request for Information (RFI)", 0)
+    doc.add_paragraph(f"RFI Number: {form_data.get('rfi_number', '')}")
+    doc.add_paragraph(f"Subject: {form_data.get('subject', '')}")
+    doc.add_heading("Question", level=1)
+    doc.add_paragraph(form_data.get("question", ""))
+    doc.add_paragraph(f"Requested Response Date: {form_data.get('response_date', '')}")
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_schedule_of_values_report(form_data):
+    doc = Document()
+    doc.add_heading("Schedule of Values", 0)
+    doc.add_paragraph(f"Project: {form_data.get('project', '')}")
+    doc.add_paragraph(f"Total Contract Amount: {form_data.get('total_amount', '')}")
+    doc.add_heading("Task Breakdown", level=1)
+    doc.add_paragraph(form_data.get("breakdown", ""))
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_contractor_estimate_report(form_data):
+    doc = Document()
+    doc.add_heading("Contractor Estimate", 0)
+    doc.add_paragraph(f"Estimate Number: {form_data.get('estimate_number', '')}")
+    doc.add_paragraph(f"Project: {form_data.get('project', '')}")
+    doc.add_paragraph(f"Estimated Material Costs: {form_data.get('material_costs', '')}")
+    doc.add_paragraph(f"Estimated Labor Costs: {form_data.get('labor_costs', '')}")
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_construction_quote_report(form_data):
+    doc = Document()
+    doc.add_heading("Construction Quote", 0)
+    doc.add_paragraph(f"Quote Number: {form_data.get('quote_number', '')}")
+    doc.add_paragraph(f"Project: {form_data.get('project', '')}")
+    doc.add_paragraph(f"Estimated Total Cost: {form_data.get('total_cost', '')}")
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_scope_of_work_report(form_data):
+    doc = Document()
+    doc.add_heading("Scope of Work", 0)
+    doc.add_paragraph(f"Project Name: {form_data.get('project_name', '')}")
+    doc.add_heading("Scope Details", level=1)
+    doc.add_paragraph(form_data.get("scope_details", ""))
+    doc.add_heading("Milestones and Deliverables", level=1)
+    doc.add_paragraph(form_data.get("milestones", ""))
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_painting_estimate_report(form_data):
+    doc = Document()
+    doc.add_heading("Painting Estimate", 0)
+    doc.add_paragraph(f"Estimate Number: {form_data.get('estimate_number', '')}")
+    doc.add_paragraph(f"Project/Location: {form_data.get('project', '')}")
+    doc.add_paragraph(f"Estimated Material Costs: {form_data.get('material_costs', '')}")
+    doc.add_paragraph(f"Estimated Labor Costs: {form_data.get('labor_costs', '')}")
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_roofing_estimate_report(form_data):
+    doc = Document()
+    doc.add_heading("Roofing Estimate", 0)
+    doc.add_paragraph(f"Estimate Number: {form_data.get('estimate_number', '')}")
+    doc.add_paragraph(f"Total Area (sq ft): {form_data.get('area', '')}")
+    doc.add_paragraph(f"Material Specification: {form_data.get('materials', '')}")
+    doc.add_paragraph(f"Estimated Cost: {form_data.get('estimated_cost', '')}")
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
 
 # ---------------------------------------------------
-# 6. Gantt Chart Generation
+# 6. Gantt Chart Generation (Aggregated by Activity)
 # ---------------------------------------------------
 def create_gantt_chart(df_filtered, color_by_status=False):
     if color_by_status:
@@ -135,12 +249,10 @@ def create_gantt_chart(df_filtered, color_by_status=False):
             "Start Date": "min",
             "End Date": "max"
         }).reset_index()
-        # Compute aggregated status for each activity.
         def compute_activity_status(activity):
             subset = df_filtered[df_filtered["Activity"] == activity]
             return aggregated_status(subset)
         agg_df["Display Status"] = agg_df["Activity"].apply(compute_activity_status)
-        # Define custom color mapping.
         color_discrete_map = {
             "Not Started": "lightgray",
             "In Progress": "blue",
@@ -158,7 +270,6 @@ def create_gantt_chart(df_filtered, color_by_status=False):
         )
         fig.update_layout(yaxis_title="Activity")
     else:
-        # Use the original aggregated view by Activity (or Activity+Room) colored by Activity.
         group_cols = ["Activity", "Room"] if selected_rooms else ["Activity"]
         agg_df = df_filtered.groupby(group_cols).agg({
             "Start Date": "min",
@@ -227,14 +338,11 @@ today = pd.Timestamp(datetime.today().date())
 overdue_df = df_filtered[(df_filtered["End Date"] < today) &
                          (df_filtered["Status"].str.strip().str.lower() != "finished")]
 overdue_count = overdue_df.shape[0]
-
 task_distribution = df_filtered.groupby("Activity").size().reset_index(name="Task Count")
 dist_fig = px.bar(task_distribution, x="Activity", y="Task Count", title="Task Distribution by Activity")
-
 upcoming_start = today
 upcoming_end = today + pd.Timedelta(days=7)
 upcoming_df = df_filtered[(df_filtered["Start Date"] >= upcoming_start) & (df_filtered["Start Date"] <= upcoming_end)]
-
 filter_summary = []
 if selected_activities:
     filter_summary.append("Activities: " + ", ".join(selected_activities))
@@ -245,10 +353,8 @@ if selected_statuses:
 if selected_date_range:
     filter_summary.append(f"Date Range: {selected_date_range[0]} to {selected_date_range[1]}")
 filter_summary_text = "; ".join(filter_summary) if filter_summary else "No filters applied."
-
 tasks_in_progress = edited_df[edited_df["Status"].str.strip().str.lower() == "in progress"].shape[0]
 not_declared = edited_df[~edited_df["Status"].str.strip().str.lower().isin(["finished", "in progress"])].shape[0]
-
 notes_df = df_filtered[df_filtered["Notes"].notna() & (df_filtered["Notes"].str.strip() != "")]
 
 # ---------------------------------------------------
@@ -268,36 +374,29 @@ with tabs[0]:
         st.plotly_chart(gantt_fig, use_container_width=True)
     st.metric("Overall Completion", f"{completion_percentage:.1f}%")
     st.progress(completion_percentage / 100)
-    
     st.markdown("#### Additional Insights")
     st.markdown(f"**Overdue Tasks:** {overdue_count}")
     if not overdue_df.empty:
         st.dataframe(overdue_df[["Activity", "Room", "Task", "Status", "End Date"]])
-    
     st.markdown("**Task Distribution by Activity:**")
     st.plotly_chart(dist_fig, use_container_width=True)
-    
     st.markdown("**Upcoming Tasks (Next 7 Days):**")
     if not upcoming_df.empty:
         st.dataframe(upcoming_df[["Activity", "Room", "Task", "Start Date", "Status"]])
     else:
         st.info("No upcoming tasks in the next 7 days.")
-    
     st.markdown("**Active Filters:**")
     st.write(filter_summary_text)
-    
     col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
     col_kpi1.metric("Total Tasks", total_tasks)
     col_kpi2.metric("In Progress", tasks_in_progress)
     col_kpi3.metric("Finished", finished_tasks)
     col_kpi4.metric("Not Declared", not_declared)
-    
     st.markdown("**Task Comments/Notes:**")
     if not notes_df.empty:
         st.dataframe(notes_df[["Activity", "Room", "Task", "Notes"]])
     else:
         st.info("No additional comments or notes.")
-    
     st.markdown("Use the filters on the sidebar to adjust the view.")
     
 # ---------- Detailed Summary Tab ----------
@@ -311,7 +410,6 @@ with tabs[1]:
 # ---------- Reports Tab ----------
 with tabs[2]:
     st.header("Reports")
-    
     # Construction Daily Report Section
     st.markdown("### Construction Daily Report")
     def generate_daily_report(df):
@@ -396,7 +494,7 @@ with tabs[2]:
     
     st.markdown("---")
     
-    # Additional Templates Section (Example: Work Order Template)
+    # Additional Templates Section
     st.markdown("### Additional Templates")
     template_choice = st.selectbox("Select Template to Generate", options=[
         "Work Order Template",
@@ -428,22 +526,231 @@ with tabs[2]:
                     "tasks": tasks_input,
                     "due_date": due_date.strftime("%Y-%m-%d")
                 }
-                doc = Document()
-                doc.add_heading("Work Order", 0)
-                doc.add_paragraph(f"Work Order Number: {form_data['work_order_number']}")
-                doc.add_paragraph(f"Contractor: {form_data['contractor']}")
-                doc.add_paragraph("Work Description:")
-                doc.add_paragraph(form_data["description"])
-                doc.add_paragraph("Assigned Tasks:")
-                doc.add_paragraph(form_data["tasks"])
-                doc.add_paragraph(f"Due Date: {form_data['due_date']}")
-                f = io.BytesIO()
-                doc.save(f)
-                work_order_doc = f.getvalue()
+                doc_bytes = generate_work_order_report(form_data)
                 st.download_button(
                     label="Download Work Order Document",
-                    data=work_order_doc,
+                    data=doc_bytes,
                     file_name="Work_Order_Document.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+    
+    elif template_choice == "Risk Register Template":
+        with st.form("risk_register_form"):
+            risk_id = st.text_input("Risk ID")
+            description = st.text_area("Risk Description")
+            impact = st.text_input("Impact")
+            likelihood = st.text_input("Likelihood")
+            mitigation = st.text_area("Mitigation Plan")
+            submitted = st.form_submit_button("Generate Risk Register Document")
+            if submitted:
+                form_data = {
+                    "risk_id": risk_id,
+                    "description": description,
+                    "impact": impact,
+                    "likelihood": likelihood,
+                    "mitigation": mitigation
+                }
+                doc_bytes = generate_risk_register_report(form_data)
+                st.download_button(
+                    label="Download Risk Register Document",
+                    data=doc_bytes,
+                    file_name="Risk_Register_Document.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+    
+    elif template_choice == "Request for Quote (RFQ) Template":
+        with st.form("rfq_form"):
+            quotation_number = st.text_input("Quotation Number")
+            customer_id = st.text_input("Customer ID")
+            company_name = st.text_input("Company Name")
+            requested = st.text_area("Requested Items/Services")
+            validity = st.text_input("Quote Validity (days)")
+            submitted = st.form_submit_button("Generate RFQ Document")
+            if submitted:
+                form_data = {
+                    "quotation_number": quotation_number,
+                    "customer_id": customer_id,
+                    "company_name": company_name,
+                    "requested": requested,
+                    "validity": validity
+                }
+                doc_bytes = generate_rfq_report(form_data)
+                st.download_button(
+                    label="Download RFQ Document",
+                    data=doc_bytes,
+                    file_name="RFQ_Document.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+    
+    elif template_choice == "Request for Proposal (RFP) Template":
+        with st.form("rfp_form"):
+            rfp_number = st.text_input("RFP Number")
+            background = st.text_area("Project Background")
+            scope = st.text_area("Scope of Work")
+            timeline = st.text_input("Timeline")
+            deadline = st.date_input("Submission Deadline", value=datetime.today())
+            submitted = st.form_submit_button("Generate RFP Document")
+            if submitted:
+                form_data = {
+                    "rfp_number": rfp_number,
+                    "background": background,
+                    "scope": scope,
+                    "timeline": timeline,
+                    "deadline": deadline.strftime("%Y-%m-%d")
+                }
+                doc_bytes = generate_rfp_report(form_data)
+                st.download_button(
+                    label="Download RFP Document",
+                    data=doc_bytes,
+                    file_name="RFP_Document.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+    
+    elif template_choice == "Request for Information (RFI) Template":
+        with st.form("rfi_form"):
+            rfi_number = st.text_input("RFI Number")
+            subject = st.text_input("Subject")
+            question = st.text_area("Question")
+            response_date = st.date_input("Requested Response Date", value=datetime.today())
+            submitted = st.form_submit_button("Generate RFI Document")
+            if submitted:
+                form_data = {
+                    "rfi_number": rfi_number,
+                    "subject": subject,
+                    "question": question,
+                    "response_date": response_date.strftime("%Y-%m-%d")
+                }
+                doc_bytes = generate_rfi_report(form_data)
+                st.download_button(
+                    label="Download RFI Document",
+                    data=doc_bytes,
+                    file_name="RFI_Document.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+    
+    elif template_choice == "Schedule of Values Template":
+        with st.form("schedule_values_form"):
+            project = st.text_input("Project Name")
+            total_amount = st.text_input("Total Contract Amount")
+            breakdown = st.text_area("Task Breakdown (list tasks and amounts)")
+            submitted = st.form_submit_button("Generate Schedule of Values Document")
+            if submitted:
+                form_data = {
+                    "project": project,
+                    "total_amount": total_amount,
+                    "breakdown": breakdown
+                }
+                doc_bytes = generate_schedule_of_values_report(form_data)
+                st.download_button(
+                    label="Download Schedule of Values Document",
+                    data=doc_bytes,
+                    file_name="Schedule_of_Values_Document.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+    
+    elif template_choice == "Contractor Estimate Template":
+        with st.form("contractor_estimate_form"):
+            estimate_number = st.text_input("Estimate Number")
+            project = st.text_input("Project Name")
+            material_costs = st.text_input("Estimated Material Costs")
+            labor_costs = st.text_input("Estimated Labor Costs")
+            submitted = st.form_submit_button("Generate Contractor Estimate Document")
+            if submitted:
+                form_data = {
+                    "estimate_number": estimate_number,
+                    "project": project,
+                    "material_costs": material_costs,
+                    "labor_costs": labor_costs
+                }
+                doc_bytes = generate_contractor_estimate_report(form_data)
+                st.download_button(
+                    label="Download Contractor Estimate Document",
+                    data=doc_bytes,
+                    file_name="Contractor_Estimate_Document.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+    
+    elif template_choice == "Construction Quote Template":
+        with st.form("construction_quote_form"):
+            quote_number = st.text_input("Quote Number")
+            project = st.text_input("Project Name")
+            total_cost = st.text_input("Estimated Total Cost")
+            submitted = st.form_submit_button("Generate Construction Quote Document")
+            if submitted:
+                form_data = {
+                    "quote_number": quote_number,
+                    "project": project,
+                    "total_cost": total_cost
+                }
+                doc_bytes = generate_construction_quote_report(form_data)
+                st.download_button(
+                    label="Download Construction Quote Document",
+                    data=doc_bytes,
+                    file_name="Construction_Quote_Document.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+    
+    elif template_choice == "Scope of Work Template":
+        with st.form("scope_work_form"):
+            project_name = st.text_input("Project Name")
+            scope_details = st.text_area("Scope Details")
+            milestones = st.text_area("Milestones and Deliverables")
+            submitted = st.form_submit_button("Generate Scope of Work Document")
+            if submitted:
+                form_data = {
+                    "project_name": project_name,
+                    "scope_details": scope_details,
+                    "milestones": milestones
+                }
+                doc_bytes = generate_scope_of_work_report(form_data)
+                st.download_button(
+                    label="Download Scope of Work Document",
+                    data=doc_bytes,
+                    file_name="Scope_of_Work_Document.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+    
+    elif template_choice == "Painting Estimate Template":
+        with st.form("painting_estimate_form"):
+            estimate_number = st.text_input("Estimate Number")
+            project = st.text_input("Project/Location")
+            material_costs = st.text_input("Estimated Material Costs")
+            labor_costs = st.text_input("Estimated Labor Costs")
+            submitted = st.form_submit_button("Generate Painting Estimate Document")
+            if submitted:
+                form_data = {
+                    "estimate_number": estimate_number,
+                    "project": project,
+                    "material_costs": material_costs,
+                    "labor_costs": labor_costs
+                }
+                doc_bytes = generate_painting_estimate_report(form_data)
+                st.download_button(
+                    label="Download Painting Estimate Document",
+                    data=doc_bytes,
+                    file_name="Painting_Estimate_Document.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+    
+    elif template_choice == "Roofing Estimate Template":
+        with st.form("roofing_estimate_form"):
+            estimate_number = st.text_input("Estimate Number")
+            area = st.text_input("Total Area (sq ft)")
+            materials = st.text_input("Material Specification")
+            estimated_cost = st.text_input("Estimated Cost")
+            submitted = st.form_submit_button("Generate Roofing Estimate Document")
+            if submitted:
+                form_data = {
+                    "estimate_number": estimate_number,
+                    "area": area,
+                    "materials": materials,
+                    "estimated_cost": estimated_cost
+                }
+                doc_bytes = generate_roofing_estimate_report(form_data)
+                st.download_button(
+                    label="Download Roofing Estimate Document",
+                    data=doc_bytes,
+                    file_name="Roofing_Estimate_Document.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
     
