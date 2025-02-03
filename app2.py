@@ -694,4 +694,4 @@ with tabs[2]:
     st.download_button(label="Download Filtered Data as Excel", data=excel_data, file_name="filtered_construction_data.xlsx", mime="application/vnd.ms-excel")
     
 st.markdown("---")
-st.markdown("Developed with a forward-thinking, data-driven approach. Enjoy tracking your construction project!")
+st.markdown("Data driven approach to Construction Project Management.")
