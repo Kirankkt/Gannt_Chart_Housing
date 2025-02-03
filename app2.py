@@ -5,14 +5,15 @@ import io
 import os
 from datetime import datetime
 from docx import Document
-from docx.shared import Inches
 
 # ---------------------------------------------------
 # App Configuration
 # ---------------------------------------------------
 st.set_page_config(page_title="Construction Project Manager Dashboard", layout="wide")
 st.title("Construction Project Manager Dashboard")
-st.markdown("This dashboard provides an executive overview of the project—including task snapshots, timeline visualization, and detailed reports. Use the sidebar to filter the data.")
+st.markdown(
+    "This dashboard provides an executive overview of the project—including task snapshots, timeline visualization, and detailed reports. Use the sidebar to filter the data."
+)
 
 # ---------------------------------------------------
 # 1. Data Loading from Excel
@@ -61,7 +62,7 @@ if st.button("Save Updates"):
     try:
         edited_df.to_excel(DATA_FILE, index=False)
         st.success("Data successfully saved!")
-        load_data.clear()  # Clear cache so that the next load uses the updated file
+        load_data.clear()  # Clear cache so next load uses updated data
     except Exception as e:
         st.error(f"Error saving data: {e}")
 
@@ -73,17 +74,14 @@ activities = sorted(edited_df["Activity"].dropna().unique())
 selected_activities = st.sidebar.multiselect("Select Activity (leave empty for all)", options=activities, default=[])
 rooms = sorted(edited_df["Room"].dropna().unique())
 selected_rooms = st.sidebar.multiselect("Select Room (leave empty for all)", options=rooms, default=[])
-
 if edited_df["Status"].notna().sum() > 0:
     statuses = sorted(edited_df["Status"].dropna().unique())
     selected_statuses = st.sidebar.multiselect("Select Status (leave empty for all)", options=statuses, default=[])
 else:
     selected_statuses = []
-
 show_finished = st.sidebar.checkbox("Show Finished Tasks", value=True)
-# NEW: Toggle for color-coding Gantt chart by task (aggregated activity) status.
+# NEW: Toggle for color-coding the aggregated Gantt chart by activity status.
 color_by_status = st.sidebar.checkbox("Color-code Gantt Chart by Activity Status", value=True)
-
 min_date = edited_df["Start Date"].min()
 max_date = edited_df["End Date"].max()
 selected_date_range = st.sidebar.date_input("Select Date Range", value=[min_date, max_date])
@@ -106,40 +104,40 @@ if len(selected_date_range) == 2:
     df_filtered = df_filtered[(df_filtered["Start Date"] >= start_range) & (df_filtered["End Date"] <= end_range)]
 
 # ---------------------------------------------------
-# Helper Function: Compute Aggregated Status for an Activity
+# 5. Helper Function: Compute Aggregated Status for an Activity
 # ---------------------------------------------------
 def aggregated_status(group_df):
     now = pd.Timestamp(datetime.today().date())
-    min_start = group_df["Start Date"].min()
-    # If current date is before any tasks start, activity is Not Started.
+    # Normalize dates to compare only date part.
+    min_start = group_df["Start Date"].dt.normalize().min()
     if now < min_start:
         return "Not Started"
-    # If all tasks are finished, then check if finished on time.
+    # If all tasks are finished, determine whether finished on time or late.
     if all(group_df["Status"].str.strip().str.lower() == "finished"):
-        max_end = group_df["End Date"].max()
+        max_end = group_df["End Date"].dt.normalize().max()
         if now <= max_end:
             return "Finished On Time"
         else:
             return "Finished Late"
-    # Otherwise, if at least one task has started, activity is In Progress.
+    # Otherwise, if at least one task has started, it's In Progress.
     return "In Progress"
 
 # ---------------------------------------------------
-# 5. Gantt Chart Generation
+# 6. Gantt Chart Generation
 # ---------------------------------------------------
 def create_gantt_chart(df_filtered, color_by_status=False):
     if color_by_status:
-        # For aggregated view by Activity only.
+        # Aggregate by Activity only.
         agg_df = df_filtered.groupby("Activity").agg({
             "Start Date": "min",
             "End Date": "max"
         }).reset_index()
-        # Compute aggregated status per activity.
+        # Compute the aggregated status per activity.
         def compute_activity_status(activity):
             subset = df_filtered[df_filtered["Activity"] == activity]
             return aggregated_status(subset)
         agg_df["Display Status"] = agg_df["Activity"].apply(compute_activity_status)
-        # Use a discrete color mapping.
+        # Define custom colors.
         color_discrete_map = {
             "Not Started": "lightgray",
             "In Progress": "blue",
@@ -157,7 +155,7 @@ def create_gantt_chart(df_filtered, color_by_status=False):
         )
         fig.update_layout(yaxis_title="Activity")
     else:
-        # Use the original aggregated view colored by Activity.
+        # Use the aggregated view by Activity (or Activity+Room) colored by Activity.
         group_cols = ["Activity", "Room"] if selected_rooms else ["Activity"]
         agg_df = df_filtered.groupby(group_cols).agg({
             "Start Date": "min",
@@ -196,14 +194,14 @@ def create_gantt_chart(df_filtered, color_by_status=False):
 gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status)
 
 # ---------------------------------------------------
-# 6. Overall Completion & Progress Bar Calculation
+# 7. Overall Completion & Progress Bar Calculation
 # ---------------------------------------------------
 total_tasks = edited_df.shape[0]
 finished_tasks = edited_df[edited_df["Status"].str.strip().str.lower() == "finished"].shape[0]
 completion_percentage = (finished_tasks / total_tasks) * 100 if total_tasks > 0 else 0
 
 # ---------------------------------------------------
-# 7. Detailed Status Summary (for Detailed Summary Tab)
+# 8. Detailed Status Summary (for Detailed Summary Tab)
 # ---------------------------------------------------
 def get_status_category(status):
     s = status.strip().lower()
@@ -213,7 +211,6 @@ def get_status_category(status):
         return "In Progress"
     else:
         return "Not Declared"
-
 edited_df["Status Category"] = edited_df["Status"].apply(get_status_category)
 status_summary = edited_df.groupby("Status Category").size().reset_index(name="Count")
 desired_order = ["Not Declared", "In Progress", "Finished"]
@@ -221,24 +218,20 @@ status_summary["Order"] = status_summary["Status Category"].apply(lambda x: desi
 status_summary = status_summary.sort_values("Order").drop("Order", axis=1)
 
 # ---------------------------------------------------
-# 8. Additional Dashboard Features
+# 9. Additional Dashboard Features
 # ---------------------------------------------------
 today = pd.Timestamp(datetime.today().date())
-# Overdue Tasks: Tasks with End Date before today and not finished
 overdue_df = df_filtered[(df_filtered["End Date"] < today) &
                          (df_filtered["Status"].str.strip().str.lower() != "finished")]
 overdue_count = overdue_df.shape[0]
 
-# Task Distribution Summary: Count tasks per Activity
 task_distribution = df_filtered.groupby("Activity").size().reset_index(name="Task Count")
 dist_fig = px.bar(task_distribution, x="Activity", y="Task Count", title="Task Distribution by Activity")
 
-# Upcoming Tasks: Tasks with Start Date within next 7 days
 upcoming_start = today
 upcoming_end = today + pd.Timedelta(days=7)
 upcoming_df = df_filtered[(df_filtered["Start Date"] >= upcoming_start) & (df_filtered["Start Date"] <= upcoming_end)]
 
-# Filter Summary Panel: Show active filters as text
 filter_summary = []
 if selected_activities:
     filter_summary.append("Activities: " + ", ".join(selected_activities))
@@ -250,15 +243,13 @@ if selected_date_range:
     filter_summary.append(f"Date Range: {selected_date_range[0]} to {selected_date_range[1]}")
 filter_summary_text = "; ".join(filter_summary) if filter_summary else "No filters applied."
 
-# Additional KPI Widgets
 tasks_in_progress = edited_df[edited_df["Status"].str.strip().str.lower() == "in progress"].shape[0]
 not_declared = edited_df[~edited_df["Status"].str.strip().str.lower().isin(["finished", "in progress"])].shape[0]
 
-# Task Comments/Notes Panel: Tasks with non-empty Notes
 notes_df = df_filtered[df_filtered["Notes"].notna() & (df_filtered["Notes"].str.strip() != "")]
 
 # ---------------------------------------------------
-# 9. Layout with Tabs: Dashboard, Detailed Summary, Reports
+# 10. Layout with Tabs: Dashboard, Detailed Summary, Reports
 # ---------------------------------------------------
 tabs = st.tabs(["Dashboard", "Detailed Summary", "Reports"])
 
@@ -402,7 +393,7 @@ with tabs[2]:
     
     st.markdown("---")
     
-    # Additional Templates Section
+    # Additional Templates Section (Example: Work Order Template)
     st.markdown("### Additional Templates")
     template_choice = st.selectbox("Select Template to Generate", options=[
         "Work Order Template",
@@ -418,7 +409,6 @@ with tabs[2]:
         "Roofing Estimate Template"
     ])
     
-    # (Each template form is similar to before; for brevity, only a couple are shown as examples.)
     if template_choice == "Work Order Template":
         with st.form("work_order_form"):
             work_order_number = st.text_input("Work Order Number")
@@ -453,8 +443,7 @@ with tabs[2]:
                     file_name="Work_Order_Document.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
-    
-    # (Other template forms – Risk Register, RFQ, RFP, etc. – follow similar patterns.)
+    # (Other template forms can be added similarly.)
     
     st.markdown("---")
     st.markdown("### Export Data")
