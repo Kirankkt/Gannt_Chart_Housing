@@ -44,7 +44,7 @@ st.markdown(
     You can update any field below. For the **Status** column, please choose from the dropdown – select either **Finished** or **In Progress**.
     """
 )
-# Force the Status column to be a dropdown.
+# Use column_config to force the Status column to be a selectbox.
 column_config = {
     "Status": st.column_config.SelectboxColumn(
         "Status",
@@ -92,7 +92,7 @@ max_date = edited_df["End Date"].max()
 selected_date_range = st.sidebar.date_input("Select Date Range", value=[min_date, max_date])
 
 # ---------------------------------------------------
-# 4. Filter the DataFrame Based on User Input
+# 4. Filtering the DataFrame Based on User Input
 # ---------------------------------------------------
 df_filtered = edited_df.copy()
 if selected_activities:
@@ -152,7 +152,7 @@ def create_gantt_chart(df_filtered):
 gantt_fig = create_gantt_chart(df_filtered)
 
 # ---------------------------------------------------
-# 6. Overall Completion & Progress Bar
+# 6. Overall Completion & Progress Bar Calculation
 # ---------------------------------------------------
 total_tasks = edited_df.shape[0]
 finished_tasks = edited_df[edited_df["Status"].str.strip().str.lower() == "finished"].shape[0]
@@ -177,58 +177,129 @@ status_summary["Order"] = status_summary["Status Category"].apply(lambda x: desi
 status_summary = status_summary.sort_values("Order").drop("Order", axis=1)
 
 # ---------------------------------------------------
-# 8. Reports: Construction Daily Report & Change Order Template
+# 8. Additional Templates Functions (Generate Word Documents)
 # ---------------------------------------------------
-def generate_daily_report(df):
-    """
-    Generate a Word document report that lists each task (with Activity, Room, Task, Status, Start and End dates)
-    for the current day (or for the filtered dataset).
-    """
-    document = Document()
-    document.add_heading("Construction Daily Report", 0)
-    document.add_paragraph(f"Report generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    document.add_heading("Daily Tasks", level=1)
-    table = document.add_table(rows=1, cols=6)
-    hdr_cells = table.rows[0].cells
-    hdr_cells[0].text = "Activity"
-    hdr_cells[1].text = "Room"
-    hdr_cells[2].text = "Task"
-    hdr_cells[3].text = "Status"
-    hdr_cells[4].text = "Start Date"
-    hdr_cells[5].text = "End Date"
-    # For simplicity, include all filtered tasks in the daily report.
-    for _, row in df.iterrows():
-        row_cells = table.add_row().cells
-        row_cells[0].text = str(row["Activity"])
-        row_cells[1].text = str(row["Room"])
-        row_cells[2].text = str(row["Task"])
-        row_cells[3].text = str(row["Status"])
-        row_cells[4].text = row["Start Date"].strftime("%Y-%m-%d") if pd.notnull(row["Start Date"]) else ""
-        row_cells[5].text = row["End Date"].strftime("%Y-%m-%d") if pd.notnull(row["End Date"]) else ""
+def generate_work_order_report(form_data):
+    doc = Document()
+    doc.add_heading("Work Order", 0)
+    doc.add_paragraph(f"Work Order Number: {form_data.get('work_order_number','')}")
+    doc.add_paragraph(f"Contractor: {form_data.get('contractor','')}")
+    doc.add_paragraph(f"Description: {form_data.get('description','')}")
+    doc.add_paragraph(f"Assigned Tasks: {form_data.get('tasks','')}")
+    doc.add_paragraph(f"Due Date: {form_data.get('due_date','')}")
     f = io.BytesIO()
-    document.save(f)
+    doc.save(f)
     return f.getvalue()
 
-def generate_change_order_report(form_data):
-    """
-    Generate a Word document change order form using the data from the form.
-    """
-    document = Document()
-    document.add_heading("Change Order Form", 0)
-    document.add_paragraph(f"Date: {form_data['date']}")
-    document.add_paragraph(f"Change Order Number: {form_data['change_order_number']}")
-    document.add_paragraph(f"Project Name: {form_data['project_name']}")
-    document.add_paragraph(f"Requested By: {form_data['requested_by']}")
-    document.add_heading("Change Description", level=1)
-    document.add_paragraph(form_data['change_description'])
-    document.add_heading("Reason for Change", level=1)
-    document.add_paragraph(form_data['reason_for_change'])
-    document.add_heading("Estimated Cost Impact", level=1)
-    document.add_paragraph(form_data['estimated_cost_impact'])
-    document.add_heading("Approval", level=1)
-    document.add_paragraph(form_data['approval'])
+def generate_risk_register_report(form_data):
+    doc = Document()
+    doc.add_heading("Risk Register", 0)
+    doc.add_paragraph(f"Risk ID: {form_data.get('risk_id','')}")
+    doc.add_paragraph(f"Risk Description: {form_data.get('description','')}")
+    doc.add_paragraph(f"Impact: {form_data.get('impact','')}")
+    doc.add_paragraph(f"Likelihood: {form_data.get('likelihood','')}")
+    doc.add_paragraph(f"Mitigation Plan: {form_data.get('mitigation','')}")
     f = io.BytesIO()
-    document.save(f)
+    doc.save(f)
+    return f.getvalue()
+
+def generate_rfq_report(form_data):
+    doc = Document()
+    doc.add_heading("Request for Quote (RFQ)", 0)
+    doc.add_paragraph(f"Quotation Number: {form_data.get('quotation_number','')}")
+    doc.add_paragraph(f"Customer ID: {form_data.get('customer_id','')}")
+    doc.add_paragraph(f"Company Name: {form_data.get('company_name','')}")
+    doc.add_paragraph(f"Requested Items/Services: {form_data.get('requested','')}")
+    doc.add_paragraph(f"Quote Validity (days): {form_data.get('validity','')}")
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_rfp_report(form_data):
+    doc = Document()
+    doc.add_heading("Request for Proposal (RFP)", 0)
+    doc.add_paragraph(f"RFP Number: {form_data.get('rfp_number','')}")
+    doc.add_paragraph(f"Project Background: {form_data.get('background','')}")
+    doc.add_paragraph(f"Scope of Work: {form_data.get('scope','')}")
+    doc.add_paragraph(f"Timeline: {form_data.get('timeline','')}")
+    doc.add_paragraph(f"Submission Deadline: {form_data.get('deadline','')}")
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_rfi_report(form_data):
+    doc = Document()
+    doc.add_heading("Request for Information (RFI)", 0)
+    doc.add_paragraph(f"RFI Number: {form_data.get('rfi_number','')}")
+    doc.add_paragraph(f"Subject: {form_data.get('subject','')}")
+    doc.add_paragraph(f"Question: {form_data.get('question','')}")
+    doc.add_paragraph(f"Requested Response Date: {form_data.get('response_date','')}")
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_schedule_of_values_report(form_data):
+    doc = Document()
+    doc.add_heading("Schedule of Values", 0)
+    doc.add_paragraph(f"Project: {form_data.get('project','')}")
+    doc.add_paragraph(f"Total Contract Amount: {form_data.get('total_amount','')}")
+    doc.add_paragraph("Task Breakdown:")
+    doc.add_paragraph(form_data.get("breakdown",""))
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_contractor_estimate_report(form_data):
+    doc = Document()
+    doc.add_heading("Contractor Estimate", 0)
+    doc.add_paragraph(f"Estimate Number: {form_data.get('estimate_number','')}")
+    doc.add_paragraph(f"Project: {form_data.get('project','')}")
+    doc.add_paragraph(f"Estimated Material Costs: {form_data.get('material_costs','')}")
+    doc.add_paragraph(f"Estimated Labor Costs: {form_data.get('labor_costs','')}")
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_construction_quote_report(form_data):
+    doc = Document()
+    doc.add_heading("Construction Quote", 0)
+    doc.add_paragraph(f"Quote Number: {form_data.get('quote_number','')}")
+    doc.add_paragraph(f"Project: {form_data.get('project','')}")
+    doc.add_paragraph(f"Estimated Total Cost: {form_data.get('total_cost','')}")
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_scope_of_work_report(form_data):
+    doc = Document()
+    doc.add_heading("Scope of Work", 0)
+    doc.add_paragraph(f"Project Name: {form_data.get('project_name','')}")
+    doc.add_paragraph(f"Scope Details: {form_data.get('scope_details','')}")
+    doc.add_paragraph(f"Milestones: {form_data.get('milestones','')}")
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_painting_estimate_report(form_data):
+    doc = Document()
+    doc.add_heading("Painting Estimate", 0)
+    doc.add_paragraph(f"Estimate Number: {form_data.get('estimate_number','')}")
+    doc.add_paragraph(f"Project/Location: {form_data.get('project','')}")
+    doc.add_paragraph(f"Estimated Material Costs: {form_data.get('material_costs','')}")
+    doc.add_paragraph(f"Estimated Labor Costs: {form_data.get('labor_costs','')}")
+    f = io.BytesIO()
+    doc.save(f)
+    return f.getvalue()
+
+def generate_roofing_estimate_report(form_data):
+    doc = Document()
+    doc.add_heading("Roofing Estimate", 0)
+    doc.add_paragraph(f"Estimate Number: {form_data.get('estimate_number','')}")
+    doc.add_paragraph(f"Total Area (sq ft): {form_data.get('area','')}")
+    doc.add_paragraph(f"Material Specification: {form_data.get('materials','')}")
+    doc.add_paragraph(f"Estimated Cost: {form_data.get('estimated_cost','')}")
+    f = io.BytesIO()
+    doc.save(f)
     return f.getvalue()
 
 # ---------------------------------------------------
@@ -262,8 +333,33 @@ with tabs[1]:
 with tabs[2]:
     st.header("Reports")
     
-    # Construction Daily Report Section
+    # --- Construction Daily Report (existing) ---
     st.markdown("### Construction Daily Report")
+    def generate_daily_report(df):
+        document = Document()
+        document.add_heading("Construction Daily Report", 0)
+        document.add_paragraph(f"Report generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        document.add_heading("Daily Tasks", level=1)
+        table = document.add_table(rows=1, cols=6)
+        hdr_cells = table.rows[0].cells
+        hdr_cells[0].text = "Activity"
+        hdr_cells[1].text = "Room"
+        hdr_cells[2].text = "Task"
+        hdr_cells[3].text = "Status"
+        hdr_cells[4].text = "Start Date"
+        hdr_cells[5].text = "End Date"
+        for _, row in df.iterrows():
+            row_cells = table.add_row().cells
+            row_cells[0].text = str(row["Activity"])
+            row_cells[1].text = str(row["Room"])
+            row_cells[2].text = str(row["Task"])
+            row_cells[3].text = str(row["Status"])
+            row_cells[4].text = row["Start Date"].strftime("%Y-%m-%d") if pd.notnull(row["Start Date"]) else ""
+            row_cells[5].text = row["End Date"].strftime("%Y-%m-%d") if pd.notnull(row["End Date"]) else ""
+        f = io.BytesIO()
+        document.save(f)
+        return f.getvalue()
+    
     daily_report = generate_daily_report(df_filtered)
     st.download_button(
         label="Download Daily Report as Word Document",
@@ -274,7 +370,7 @@ with tabs[2]:
     
     st.markdown("---")
     
-    # Change Order Template Section
+    # --- Change Order Template (existing) ---
     st.markdown("### Change Order Template")
     with st.form("change_order_form"):
         change_order_number = st.text_input("Change Order Number")
@@ -284,7 +380,7 @@ with tabs[2]:
         change_description = st.text_area("Change Description")
         reason_for_change = st.text_area("Reason for Change")
         estimated_cost_impact = st.text_input("Estimated Cost Impact")
-        approval = st.text_input("Approval (Enter name of approver)")
+        approval = st.text_input("Approval (Enter approver's name)")
         submitted = st.form_submit_button("Generate Change Order Document")
         if submitted:
             form_data = {
@@ -297,13 +393,291 @@ with tabs[2]:
                 "estimated_cost_impact": estimated_cost_impact,
                 "approval": approval
             }
-            change_order_doc = generate_change_order_report(form_data)
+            change_order_doc = generate_change_order_report(form_data) if 'generate_change_order_report' in globals() else None
+            # We can re-use the following simple pattern for Change Order if needed:
+            doc = Document()
+            doc.add_heading("Change Order", 0)
+            doc.add_paragraph(f"Change Order Number: {form_data['change_order_number']}")
+            doc.add_paragraph(f"Project Name: {form_data['project_name']}")
+            doc.add_paragraph(f"Requested By: {form_data['requested_by']}")
+            doc.add_paragraph(f"Date: {form_data['date']}")
+            doc.add_paragraph("Change Description:")
+            doc.add_paragraph(form_data['change_description'])
+            doc.add_paragraph("Reason for Change:")
+            doc.add_paragraph(form_data['reason_for_change'])
+            doc.add_paragraph(f"Estimated Cost Impact: {form_data['estimated_cost_impact']}")
+            doc.add_paragraph(f"Approval: {form_data['approval']}")
+            f = io.BytesIO()
+            doc.save(f)
+            change_order_doc = f.getvalue()
             st.download_button(
                 label="Download Change Order Document",
                 data=change_order_doc,
                 file_name="Change_Order_Document.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             )
+    
+    st.markdown("---")
+    
+    # --- Additional Templates Section ---
+    st.markdown("### Additional Templates")
+    template_choice = st.selectbox("Select Template to Generate", options=[
+        "Work Order Template",
+        "Risk Register Template",
+        "Request for Quote (RFQ) Template",
+        "Request for Proposal (RFP) Template",
+        "Request for Information (RFI) Template",
+        "Schedule of Values Template",
+        "Contractor Estimate Template",
+        "Construction Quote Template",
+        "Scope of Work Template",
+        "Painting Estimate Template",
+        "Roofing Estimate Template"
+    ])
+    
+    if template_choice == "Work Order Template":
+        with st.form("work_order_form"):
+            work_order_number = st.text_input("Work Order Number")
+            contractor = st.text_input("Contractor")
+            description = st.text_area("Work Description")
+            tasks_input = st.text_area("Assigned Tasks")
+            due_date = st.date_input("Due Date", value=datetime.today())
+            submitted = st.form_submit_button("Generate Work Order Document")
+            if submitted:
+                form_data = {
+                    "work_order_number": work_order_number,
+                    "contractor": contractor,
+                    "description": description,
+                    "tasks": tasks_input,
+                    "due_date": due_date.strftime("%Y-%m-%d")
+                }
+                doc_bytes = generate_work_order_report(form_data)
+                st.download_button(
+                    label="Download Work Order Document",
+                    data=doc_bytes,
+                    file_name="Work_Order_Document.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+    
+    elif template_choice == "Risk Register Template":
+        with st.form("risk_register_form"):
+            risk_id = st.text_input("Risk ID")
+            description = st.text_area("Risk Description")
+            impact = st.text_input("Impact")
+            likelihood = st.text_input("Likelihood")
+            mitigation = st.text_area("Mitigation Plan")
+            submitted = st.form_submit_button("Generate Risk Register Document")
+            if submitted:
+                form_data = {
+                    "risk_id": risk_id,
+                    "description": description,
+                    "impact": impact,
+                    "likelihood": likelihood,
+                    "mitigation": mitigation
+                }
+                doc_bytes = generate_risk_register_report(form_data)
+                st.download_button(
+                    label="Download Risk Register Document",
+                    data=doc_bytes,
+                    file_name="Risk_Register_Document.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+    
+    elif template_choice == "Request for Quote (RFQ) Template":
+        with st.form("rfq_form"):
+            quotation_number = st.text_input("Quotation Number")
+            customer_id = st.text_input("Customer ID")
+            company_name = st.text_input("Company Name")
+            requested = st.text_area("Requested Items/Services")
+            validity = st.text_input("Quote Validity (days)")
+            submitted = st.form_submit_button("Generate RFQ Document")
+            if submitted:
+                form_data = {
+                    "quotation_number": quotation_number,
+                    "customer_id": customer_id,
+                    "company_name": company_name,
+                    "requested": requested,
+                    "validity": validity
+                }
+                doc_bytes = generate_rfq_report(form_data)
+                st.download_button(
+                    label="Download RFQ Document",
+                    data=doc_bytes,
+                    file_name="RFQ_Document.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+    
+    elif template_choice == "Request for Proposal (RFP) Template":
+        with st.form("rfp_form"):
+            rfp_number = st.text_input("RFP Number")
+            background = st.text_area("Project Background")
+            scope = st.text_area("Scope of Work")
+            timeline = st.text_input("Timeline")
+            deadline = st.date_input("Submission Deadline", value=datetime.today())
+            submitted = st.form_submit_button("Generate RFP Document")
+            if submitted:
+                form_data = {
+                    "rfp_number": rfp_number,
+                    "background": background,
+                    "scope": scope,
+                    "timeline": timeline,
+                    "deadline": deadline.strftime("%Y-%m-%d")
+                }
+                doc_bytes = generate_rfp_report(form_data)
+                st.download_button(
+                    label="Download RFP Document",
+                    data=doc_bytes,
+                    file_name="RFP_Document.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+    
+    elif template_choice == "Request for Information (RFI) Template":
+        with st.form("rfi_form"):
+            rfi_number = st.text_input("RFI Number")
+            subject = st.text_input("Subject")
+            question = st.text_area("Question")
+            response_date = st.date_input("Requested Response Date", value=datetime.today())
+            submitted = st.form_submit_button("Generate RFI Document")
+            if submitted:
+                form_data = {
+                    "rfi_number": rfi_number,
+                    "subject": subject,
+                    "question": question,
+                    "response_date": response_date.strftime("%Y-%m-%d")
+                }
+                doc_bytes = generate_rfi_report(form_data)
+                st.download_button(
+                    label="Download RFI Document",
+                    data=doc_bytes,
+                    file_name="RFI_Document.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+    
+    elif template_choice == "Schedule of Values Template":
+        with st.form("schedule_values_form"):
+            project = st.text_input("Project Name")
+            total_amount = st.text_input("Total Contract Amount")
+            breakdown = st.text_area("Task Breakdown (list tasks and amounts)")
+            submitted = st.form_submit_button("Generate Schedule of Values Document")
+            if submitted:
+                form_data = {
+                    "project": project,
+                    "total_amount": total_amount,
+                    "breakdown": breakdown
+                }
+                doc_bytes = generate_schedule_of_values_report(form_data)
+                st.download_button(
+                    label="Download Schedule of Values Document",
+                    data=doc_bytes,
+                    file_name="Schedule_of_Values_Document.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+    
+    elif template_choice == "Contractor Estimate Template":
+        with st.form("contractor_estimate_form"):
+            estimate_number = st.text_input("Estimate Number")
+            project = st.text_input("Project Name")
+            material_costs = st.text_input("Estimated Material Costs")
+            labor_costs = st.text_input("Estimated Labor Costs")
+            submitted = st.form_submit_button("Generate Contractor Estimate Document")
+            if submitted:
+                form_data = {
+                    "estimate_number": estimate_number,
+                    "project": project,
+                    "material_costs": material_costs,
+                    "labor_costs": labor_costs
+                }
+                doc_bytes = generate_contractor_estimate_report(form_data)
+                st.download_button(
+                    label="Download Contractor Estimate Document",
+                    data=doc_bytes,
+                    file_name="Contractor_Estimate_Document.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+    
+    elif template_choice == "Construction Quote Template":
+        with st.form("construction_quote_form"):
+            quote_number = st.text_input("Quote Number")
+            project = st.text_input("Project Name")
+            total_cost = st.text_input("Estimated Total Cost")
+            submitted = st.form_submit_button("Generate Construction Quote Document")
+            if submitted:
+                form_data = {
+                    "quote_number": quote_number,
+                    "project": project,
+                    "total_cost": total_cost
+                }
+                doc_bytes = generate_construction_quote_report(form_data)
+                st.download_button(
+                    label="Download Construction Quote Document",
+                    data=doc_bytes,
+                    file_name="Construction_Quote_Document.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+    
+    elif template_choice == "Scope of Work Template":
+        with st.form("scope_work_form"):
+            project_name = st.text_input("Project Name")
+            scope_details = st.text_area("Scope Details")
+            milestones = st.text_area("Milestones and Deliverables")
+            submitted = st.form_submit_button("Generate Scope of Work Document")
+            if submitted:
+                form_data = {
+                    "project_name": project_name,
+                    "scope_details": scope_details,
+                    "milestones": milestones
+                }
+                doc_bytes = generate_scope_of_work_report(form_data)
+                st.download_button(
+                    label="Download Scope of Work Document",
+                    data=doc_bytes,
+                    file_name="Scope_of_Work_Document.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+    
+    elif template_choice == "Painting Estimate Template":
+        with st.form("painting_estimate_form"):
+            estimate_number = st.text_input("Estimate Number")
+            project = st.text_input("Project/Location")
+            material_costs = st.text_input("Estimated Material Costs")
+            labor_costs = st.text_input("Estimated Labor Costs")
+            submitted = st.form_submit_button("Generate Painting Estimate Document")
+            if submitted:
+                form_data = {
+                    "estimate_number": estimate_number,
+                    "project": project,
+                    "material_costs": material_costs,
+                    "labor_costs": labor_costs
+                }
+                doc_bytes = generate_painting_estimate_report(form_data)
+                st.download_button(
+                    label="Download Painting Estimate Document",
+                    data=doc_bytes,
+                    file_name="Painting_Estimate_Document.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+    
+    elif template_choice == "Roofing Estimate Template":
+        with st.form("roofing_estimate_form"):
+            estimate_number = st.text_input("Estimate Number")
+            area = st.text_input("Total Area (sq ft)")
+            materials = st.text_input("Material Specification")
+            estimated_cost = st.text_input("Estimated Cost")
+            submitted = st.form_submit_button("Generate Roofing Estimate Document")
+            if submitted:
+                form_data = {
+                    "estimate_number": estimate_number,
+                    "area": area,
+                    "materials": materials,
+                    "estimated_cost": estimated_cost
+                }
+                doc_bytes = generate_roofing_estimate_report(form_data)
+                st.download_button(
+                    label="Download Roofing Estimate Document",
+                    data=doc_bytes,
+                    file_name="Roofing_Estimate_Document.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
     
     st.markdown("---")
     st.markdown("### Export Data")
@@ -318,6 +692,6 @@ with tabs[2]:
     st.download_button(label="Download Filtered Data as CSV", data=csv_data, file_name="filtered_construction_data.csv", mime="text/csv")
     excel_data = convert_df_to_excel(df_filtered)
     st.download_button(label="Download Filtered Data as Excel", data=excel_data, file_name="filtered_construction_data.xlsx", mime="application/vnd.ms-excel")
-
+    
 st.markdown("---")
 st.markdown("Developed with a forward-thinking, data-driven approach. Enjoy tracking your construction project!")
