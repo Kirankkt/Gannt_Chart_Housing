@@ -11,9 +11,7 @@ from docx import Document
 # ---------------------------------------------------
 st.set_page_config(page_title="Construction Project Manager Dashboard", layout="wide")
 st.title("Construction Project Manager Dashboard")
-st.markdown(
-    "This dashboard provides an executive overview of the project—including task snapshots, timeline visualization, and detailed reports. Use the sidebar to filter the data."
-)
+st.markdown("This dashboard provides an executive overview of the project—including task snapshots, timeline visualization, and detailed reports. Use the sidebar to filter the data.")
 
 # ---------------------------------------------------
 # 1. Data Loading from Excel
@@ -107,19 +105,20 @@ if len(selected_date_range) == 2:
 # 5. Helper Function: Compute Aggregated Status for an Activity
 # ---------------------------------------------------
 def aggregated_status(group_df):
-    now = pd.Timestamp(datetime.today().date())
-    # Normalize dates to compare only date part.
-    min_start = group_df["Start Date"].dt.normalize().min()
-    if now < min_start:
-        return "Not Started"
-    # If all tasks are finished, determine whether finished on time or late.
+    # If all tasks are finished, compute finish timing regardless of start date.
     if all(group_df["Status"].str.strip().str.lower() == "finished"):
+        now = pd.Timestamp(datetime.today().date())
         max_end = group_df["End Date"].dt.normalize().max()
         if now <= max_end:
             return "Finished On Time"
         else:
             return "Finished Late"
-    # Otherwise, if at least one task has started, it's In Progress.
+    # Otherwise, if the current date is before the earliest start date, return "Not Started".
+    now = pd.Timestamp(datetime.today().date())
+    min_start = group_df["Start Date"].dt.normalize().min()
+    if now < min_start:
+        return "Not Started"
+    # Else, the activity is in progress.
     return "In Progress"
 
 # ---------------------------------------------------
@@ -137,7 +136,7 @@ def create_gantt_chart(df_filtered, color_by_status=False):
             subset = df_filtered[df_filtered["Activity"] == activity]
             return aggregated_status(subset)
         agg_df["Display Status"] = agg_df["Activity"].apply(compute_activity_status)
-        # Define custom colors.
+        # Custom color mapping.
         color_discrete_map = {
             "Not Started": "lightgray",
             "In Progress": "blue",
@@ -393,7 +392,7 @@ with tabs[2]:
     
     st.markdown("---")
     
-    # Additional Templates Section (Example: Work Order Template)
+    # Additional Templates Section
     st.markdown("### Additional Templates")
     template_choice = st.selectbox("Select Template to Generate", options=[
         "Work Order Template",
@@ -443,7 +442,7 @@ with tabs[2]:
                     file_name="Work_Order_Document.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
-    # (Other template forms can be added similarly.)
+    # (Additional template forms for Risk Register, RFQ, etc. can be added similarly.)
     
     st.markdown("---")
     st.markdown("### Export Data")
@@ -458,6 +457,6 @@ with tabs[2]:
     st.download_button(label="Download Filtered Data as CSV", data=csv_data, file_name="filtered_construction_data.csv", mime="text/csv")
     excel_data = convert_df_to_excel(df_filtered)
     st.download_button(label="Download Filtered Data as Excel", data=excel_data, file_name="filtered_construction_data.xlsx", mime="application/vnd.ms-excel")
-    
+
 st.markdown("---")
 st.markdown("Developed with a forward-thinking, data-driven approach. Enjoy tracking your construction project!")
