@@ -16,7 +16,7 @@ st.markdown(
 )
 
 # ---------------------------------------------------
-# 1. Data Loading from Excel (and add extra columns if missing)
+# 1. Data Loading from Excel
 # ---------------------------------------------------
 @st.cache_data
 def load_data(file_path):
@@ -28,39 +28,21 @@ def load_data(file_path):
     df.columns = df.columns.str.strip()
     df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce")
     df["End Date"] = pd.to_datetime(df["End Date"], errors="coerce")
+    # Ensure Status is a string
     df["Status"] = df["Status"].astype(str)
-    # Ensure additional columns exist; if not, add them with default values.
-    extra_cols = {
-        "Progress": 0.0,
-        "Priority": "Normal",
-        "Planned Start": pd.NaT,
-        "Actual Start": pd.NaT,
-        "Due": pd.NaT,
-        "Finish": pd.NaT,
-        "Duration": 0,
-        "Hours": 0.0,
-        "Cost": 0.0
-    }
-    for col, default in extra_cols.items():
-        if col not in df.columns:
-            df[col] = default
-        else:
-            # Convert dates if they exist
-            if col in ["Planned Start", "Actual Start", "Due", "Finish"]:
-                df[col] = pd.to_datetime(df[col], errors="coerce")
     return df
 
 DATA_FILE = "construction_timeline.xlsx"
-df = load_data(DATA_FILE)
+df = load_data(DATA_FILE)  # Original dataset
 
 # ---------------------------------------------------
-# 2. Data Editing Option (Basic editing of main fields)
+# 2. Data Editing Option (Basic Fields)
 # ---------------------------------------------------
 st.subheader("Update Task Information (Basic Fields)")
 st.markdown(
     """
     **Instructions:**  
-    You can update fields below. For the **Status** column, please choose either **Finished** or **In Progress**.
+    You can update any field below. For the **Status** column, please choose from the dropdown – select either **Finished** or **In Progress**.
     """
 )
 column_config = {
@@ -77,15 +59,15 @@ if st.button("Save Basic Updates"):
     try:
         edited_df.to_excel(DATA_FILE, index=False)
         st.success("Basic data successfully saved!")
-        load_data.clear()
+        load_data.clear()  # Clear cache so next load uses updated data
     except Exception as e:
         st.error(f"Error saving data: {e}")
 
 # ---------------------------------------------------
-# 3. Detailed Task Editing (Extra Fields)
+# 3. Detailed Task Editing (Additional Fields)
 # ---------------------------------------------------
 with st.expander("Edit Detailed Task (Additional Fields)"):
-    # Use the row index as an identifier (assumes row index is unique)
+    # Using row index (converted to string) as an identifier
     task_ids = df.index.astype(str).tolist()
     selected_row = st.selectbox("Select Task Row (by index)", options=task_ids)
     row = df.loc[int(selected_row)]
@@ -118,7 +100,7 @@ with st.expander("Edit Detailed Task (Additional Fields)"):
             load_data.clear()
 
 # ---------------------------------------------------
-# 4. Sidebar Filters & Options (for main view)
+# 4. Sidebar Filters & Options (Main View)
 # ---------------------------------------------------
 st.sidebar.header("Filter Options")
 activities = sorted(edited_df["Activity"].dropna().unique())
@@ -161,7 +143,7 @@ def aggregated_status(group_df):
     # First, if any task is manually set to "in progress", return "In Progress"
     if any(group_df["Status"].str.strip().str.lower() == "in progress"):
         return "In Progress"
-    # If all tasks are finished, decide based on latest end date.
+    # If all tasks are finished, decide based on the latest end date.
     if all(group_df["Status"].str.strip().str.lower() == "finished"):
         max_end = group_df["End Date"].dt.normalize().max()
         if now <= max_end:
@@ -203,12 +185,12 @@ def create_gantt_chart(df_filtered, color_by_status=False):
             title="Activity Timeline (Color-coded by Status)"
         )
         fig.update_layout(yaxis_title="Activity")
-        # Add average progress annotation per activity (if available)
-        # Compute average progress per activity from df_filtered
+        # Optionally add annotations for average progress per activity:
         progress_avg = df_filtered.groupby("Activity")["Progress"].mean().reset_index()
         for _, r in progress_avg.iterrows():
+            end_date = agg_df[agg_df["Activity"]==r["Activity"]]["End Date"].values[0]
             fig.add_annotation(
-                x=agg_df[agg_df["Activity"]==r["Activity"]]["End Date"].values[0],
+                x=end_date,
                 y=r["Activity"],
                 text=f"{r['Progress']:.0f}%",
                 showarrow=False,
@@ -439,7 +421,7 @@ def generate_roofing_estimate_report(form_data):
     return f.getvalue()
 
 # ---------------------------------------------------
-# 14. Gantt Chart Generation (Aggregated by Activity) - (Repeated from above)
+# 12. Gantt Chart Generation (Aggregated by Activity) - (Repeat)
 # ---------------------------------------------------
 def create_gantt_chart(df_filtered, color_by_status=False):
     if color_by_status:
@@ -467,10 +449,9 @@ def create_gantt_chart(df_filtered, color_by_status=False):
             title="Activity Timeline (Color-coded by Status)"
         )
         fig.update_layout(yaxis_title="Activity")
-        # Add annotation: average progress per activity
         progress_avg = df_filtered.groupby("Activity")["Progress"].mean().reset_index()
         for _, r in progress_avg.iterrows():
-            end_date = agg_df[agg_df["Activity"]==r["Activity"]]["End Date"].values[0]
+            end_date = agg_df[agg_df["Activity"] == r["Activity"]]["End Date"].values[0]
             fig.add_annotation(
                 x=end_date,
                 y=r["Activity"],
@@ -517,14 +498,14 @@ def create_gantt_chart(df_filtered, color_by_status=False):
 gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status)
 
 # ---------------------------------------------------
-# 15. Overall Completion & Progress Bar Calculation
+# 13. Overall Completion & Progress Bar Calculation
 # ---------------------------------------------------
 total_tasks = edited_df.shape[0]
 finished_tasks = edited_df[edited_df["Status"].str.strip().str.lower() == "finished"].shape[0]
 completion_percentage = (finished_tasks / total_tasks) * 100 if total_tasks > 0 else 0
 
 # ---------------------------------------------------
-# 16. Detailed Status Summary (for Detailed Summary Tab)
+# 14. Detailed Status Summary (for Detailed Summary Tab)
 # ---------------------------------------------------
 def get_status_category(status):
     s = status.strip().lower()
@@ -541,7 +522,7 @@ status_summary["Order"] = status_summary["Status Category"].apply(lambda x: desi
 status_summary = status_summary.sort_values("Order").drop("Order", axis=1)
 
 # ---------------------------------------------------
-# 17. Additional Dashboard Features
+# 15. Additional Dashboard Features
 # ---------------------------------------------------
 today = pd.Timestamp(datetime.today().date())
 overdue_df = df_filtered[(df_filtered["End Date"] < today) &
@@ -567,9 +548,9 @@ not_declared = edited_df[~edited_df["Status"].str.strip().str.lower().isin(["fin
 notes_df = df_filtered[df_filtered["Notes"].notna() & (df_filtered["Notes"].str.strip() != "")]
 
 # ---------------------------------------------------
-# 18. Layout with Tabs: Dashboard, Detailed Summary, Reports
+# 16. Layout with Tabs: Dashboard, Detailed Summary, Reports, Original Dataset
 # ---------------------------------------------------
-tabs = st.tabs(["Dashboard", "Detailed Summary", "Reports"])
+tabs = st.tabs(["Dashboard", "Detailed Summary", "Reports", "Original Dataset"])
 
 # ---------- Dashboard Tab ----------
 with tabs[0]:
@@ -974,5 +955,12 @@ with tabs[2]:
     excel_data = convert_df_to_excel(df_filtered)
     st.download_button(label="Download Filtered Data as Excel", data=excel_data, file_name="filtered_construction_data.xlsx", mime="application/vnd.ms-excel")
     
+# ---------------------------------------------------
+# 17. Original Dataset Tab
+# ---------------------------------------------------
+with tabs[3]:
+    st.header("Original Dataset")
+    st.dataframe(df)
+
 st.markdown("---")
 st.markdown("Developed with a forward-thinking, data-driven approach. Enjoy tracking your construction project!")
