@@ -30,5 +30,5 @@ Make sure you have Python installed (Python 3.7 or later is recommended). You wi
 Open your terminal and run:
 
 ```bash
-git clone https://github.com/Kirankkt/Gannt_Chart_Housing>.git
-cd <Gannt_Chart_Housing>
+git clone https://github.com/Kirankkt/Gannt_Chart_Housing.git
+cd Gannt_Chart_Housing
