@@ -42,18 +42,20 @@ st.subheader("Update Task Information")
 st.markdown(
     """
     **Instructions:**  
-    You can update any field below. For the **Status** column, please choose from the dropdown – select either **Finished**, **In Progress**, or **Not Started**.
+    You can update any field below. For the **Status** column, please choose one of the following:  
+    **Finished**, **In Progress**, or **Not Started**.
     """
 )
+# Updated dropdown options to include "Not Started"
 column_config = {
     "Status": st.column_config.SelectboxColumn(
         "Status",
         options=["Finished", "In Progress", "Not Started"],
-        help="Select 'Finished' for completed tasks, 'In Progress' for ongoing tasks, or 'Not Started' for tasks that have not begun."
+        help="Select 'Finished' for completed tasks, 'In Progress' for tasks underway, or 'Not Started' for tasks that have not begun."
     )
 }
 edited_df = st.data_editor(df, column_config=column_config, use_container_width=True)
-# Changed default to "Not Started" if blank or missing.
+# If the cell is empty or null, default it to "Not Started"
 edited_df["Status"] = edited_df["Status"].fillna("Not Started").replace("", "Not Started")
 
 # ---------------------------------------------------
@@ -939,4 +941,4 @@ with tabs[2]:
     st.download_button(label="Download Filtered Data as Excel", data=excel_data, file_name="filtered_construction_data.xlsx", mime="application/vnd.ms-excel")
     
 st.markdown("---")
-st.markdown("CMBP Analytics 2")
+st.markdown("CMBP Analytics II")
