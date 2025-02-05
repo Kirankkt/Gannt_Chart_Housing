@@ -12,7 +12,7 @@ from docx import Document
 st.set_page_config(page_title="Construction Project Manager Dashboard", layout="wide")
 st.title("Construction Project Manager Dashboard")
 st.markdown(
-    "This dashboard provides an executive overview of the project—including task snapshots, timeline visualization, and detailed reports. Use the sidebar to filter the data."
+    "This dashboard provides an  overview of the project—including task snapshots, timeline visualization, and detailed reports. Use the sidebar to filter the data."
 )
 
 # ---------------------------------------------------
@@ -42,18 +42,21 @@ st.subheader("Update Task Information")
 st.markdown(
     """
     **Instructions:**  
-    You can update any field below. For the **Status** column, please choose from the dropdown – select either **Finished** or **In Progress**.
+    You can update any field below. For the **Status** column, please choose one of the following:  
+    **Finished**, **In Progress**, or **Not Started**.
     """
 )
+# Updated dropdown options to include "Not Started"
 column_config = {
     "Status": st.column_config.SelectboxColumn(
         "Status",
-        options=["Finished", "In Progress"],
-        help="Select 'Finished' for completed tasks or 'In Progress' for ongoing tasks."
+        options=["Finished", "In Progress", "Not Started"],
+        help="Select 'Finished' for completed tasks, 'In Progress' for tasks underway, or 'Not Started' for tasks that have not begun."
     )
 }
 edited_df = st.data_editor(df, column_config=column_config, use_container_width=True)
-edited_df["Status"] = edited_df["Status"].fillna("In Progress").replace("", "In Progress")
+# If the cell is empty or null, default it to "Not Started"
+edited_df["Status"] = edited_df["Status"].fillna("Not Started").replace("", "Not Started")
 
 # ---------------------------------------------------
 # 2a. Save Updates Button
@@ -108,21 +111,26 @@ if len(selected_date_range) == 2:
 # ---------------------------------------------------
 def aggregated_status(group_df):
     now = pd.Timestamp(datetime.today().date())
-    # First, if any task is manually set to "in progress", return "In Progress"
-    if any(group_df["Status"].str.strip().str.lower() == "in progress"):
+    # Use lower-case stripped values for consistency
+    statuses = group_df["Status"].str.strip().str.lower()
+    # If any task is "in progress", then the activity is "In Progress"
+    if "in progress" in statuses.values:
         return "In Progress"
-    # If all tasks are finished, decide based on the latest end date.
-    if all(group_df["Status"].str.strip().str.lower() == "finished"):
+    # If all tasks are "finished", then determine on schedule or late:
+    if all(status == "finished" for status in statuses):
         max_end = group_df["End Date"].dt.normalize().max()
         if now <= max_end:
             return "Finished On Time"
         else:
             return "Finished Late"
-    # Otherwise, if today is before the earliest start date, return "Not Started"
+    # If all tasks are "not started", then return "Not Started"
+    if all(status == "not started" for status in statuses):
+        return "Not Started"
+    # If today is before the earliest start date, return "Not Started"
     min_start = group_df["Start Date"].dt.normalize().min()
     if now < min_start:
         return "Not Started"
-    # Else, default to "In Progress"
+    # Otherwise, default to "In Progress"
     return "In Progress"
 
 # ---------------------------------------------------
@@ -158,7 +166,6 @@ def create_gantt_chart(df_filtered, color_by_status=False):
         )
         fig.update_layout(yaxis_title="Activity")
     else:
-        # Use the original aggregated view (by Activity or Activity+Room) colored by Activity.
         group_cols = ["Activity", "Room"] if selected_rooms else ["Activity"]
         agg_df = df_filtered.groupby(group_cols).agg({
             "Start Date": "min",
@@ -626,13 +633,14 @@ with tabs[2]:
             doc.add_paragraph(f"Approval: {form_data['approval']}")
             f = io.BytesIO()
             doc.save(f)
-            change_order_doc = f.getvalue()
-            st.download_button(
-                label="Download Change Order Document",
-                data=change_order_doc,
-                file_name="Change_Order_Document.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            )
+            st.session_state["change_order_doc"] = f.getvalue()
+    if "change_order_doc" in st.session_state:
+        st.download_button(
+            label="Download Change Order Document",
+            data=st.session_state["change_order_doc"],
+            file_name="Change_Order_Document.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
     
     st.markdown("---")
     
@@ -669,12 +677,14 @@ with tabs[2]:
                     "due_date": due_date.strftime("%Y-%m-%d")
                 }
                 doc_bytes = generate_work_order_report(form_data)
-                st.download_button(
-                    label="Download Work Order Document",
-                    data=doc_bytes,
-                    file_name="Work_Order_Document.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
+                st.session_state["work_order_doc"] = doc_bytes
+        if "work_order_doc" in st.session_state:
+            st.download_button(
+                label="Download Work Order Document",
+                data=st.session_state["work_order_doc"],
+                file_name="Work_Order_Document.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
     
     elif template_choice == "Risk Register Template":
         with st.form("risk_register_form"):
@@ -693,12 +703,14 @@ with tabs[2]:
                     "mitigation": mitigation
                 }
                 doc_bytes = generate_risk_register_report(form_data)
-                st.download_button(
-                    label="Download Risk Register Document",
-                    data=doc_bytes,
-                    file_name="Risk_Register_Document.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
+                st.session_state["risk_register_doc"] = doc_bytes
+        if "risk_register_doc" in st.session_state:
+            st.download_button(
+                label="Download Risk Register Document",
+                data=st.session_state["risk_register_doc"],
+                file_name="Risk_Register_Document.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
     
     elif template_choice == "Request for Quote (RFQ) Template":
         with st.form("rfq_form"):
@@ -717,12 +729,14 @@ with tabs[2]:
                     "validity": validity
                 }
                 doc_bytes = generate_rfq_report(form_data)
-                st.download_button(
-                    label="Download RFQ Document",
-                    data=doc_bytes,
-                    file_name="RFQ_Document.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
+                st.session_state["rfq_doc"] = doc_bytes
+        if "rfq_doc" in st.session_state:
+            st.download_button(
+                label="Download RFQ Document",
+                data=st.session_state["rfq_doc"],
+                file_name="RFQ_Document.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
     
     elif template_choice == "Request for Proposal (RFP) Template":
         with st.form("rfp_form"):
@@ -741,12 +755,14 @@ with tabs[2]:
                     "deadline": deadline.strftime("%Y-%m-%d")
                 }
                 doc_bytes = generate_rfp_report(form_data)
-                st.download_button(
-                    label="Download RFP Document",
-                    data=doc_bytes,
-                    file_name="RFP_Document.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
+                st.session_state["rfp_doc"] = doc_bytes
+        if "rfp_doc" in st.session_state:
+            st.download_button(
+                label="Download RFP Document",
+                data=st.session_state["rfp_doc"],
+                file_name="RFP_Document.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
     
     elif template_choice == "Request for Information (RFI) Template":
         with st.form("rfi_form"):
@@ -763,12 +779,14 @@ with tabs[2]:
                     "response_date": response_date.strftime("%Y-%m-%d")
                 }
                 doc_bytes = generate_rfi_report(form_data)
-                st.download_button(
-                    label="Download RFI Document",
-                    data=doc_bytes,
-                    file_name="RFI_Document.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
+                st.session_state["rfi_doc"] = doc_bytes
+        if "rfi_doc" in st.session_state:
+            st.download_button(
+                label="Download RFI Document",
+                data=st.session_state["rfi_doc"],
+                file_name="RFI_Document.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
     
     elif template_choice == "Schedule of Values Template":
         with st.form("schedule_values_form"):
@@ -783,12 +801,14 @@ with tabs[2]:
                     "breakdown": breakdown
                 }
                 doc_bytes = generate_schedule_of_values_report(form_data)
-                st.download_button(
-                    label="Download Schedule of Values Document",
-                    data=doc_bytes,
-                    file_name="Schedule_of_Values_Document.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
+                st.session_state["schedule_doc"] = doc_bytes
+        if "schedule_doc" in st.session_state:
+            st.download_button(
+                label="Download Schedule of Values Document",
+                data=st.session_state["schedule_doc"],
+                file_name="Schedule_of_Values_Document.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
     
     elif template_choice == "Contractor Estimate Template":
         with st.form("contractor_estimate_form"):
@@ -805,12 +825,14 @@ with tabs[2]:
                     "labor_costs": labor_costs
                 }
                 doc_bytes = generate_contractor_estimate_report(form_data)
-                st.download_button(
-                    label="Download Contractor Estimate Document",
-                    data=doc_bytes,
-                    file_name="Contractor_Estimate_Document.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
+                st.session_state["contractor_estimate_doc"] = doc_bytes
+        if "contractor_estimate_doc" in st.session_state:
+            st.download_button(
+                label="Download Contractor Estimate Document",
+                data=st.session_state["contractor_estimate_doc"],
+                file_name="Contractor_Estimate_Document.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
     
     elif template_choice == "Construction Quote Template":
         with st.form("construction_quote_form"):
@@ -825,12 +847,14 @@ with tabs[2]:
                     "total_cost": total_cost
                 }
                 doc_bytes = generate_construction_quote_report(form_data)
-                st.download_button(
-                    label="Download Construction Quote Document",
-                    data=doc_bytes,
-                    file_name="Construction_Quote_Document.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
+                st.session_state["construction_quote_doc"] = doc_bytes
+        if "construction_quote_doc" in st.session_state:
+            st.download_button(
+                label="Download Construction Quote Document",
+                data=st.session_state["construction_quote_doc"],
+                file_name="Construction_Quote_Document.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
     
     elif template_choice == "Scope of Work Template":
         with st.form("scope_work_form"):
@@ -845,12 +869,14 @@ with tabs[2]:
                     "milestones": milestones
                 }
                 doc_bytes = generate_scope_of_work_report(form_data)
-                st.download_button(
-                    label="Download Scope of Work Document",
-                    data=doc_bytes,
-                    file_name="Scope_of_Work_Document.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
+                st.session_state["scope_work_doc"] = doc_bytes
+        if "scope_work_doc" in st.session_state:
+            st.download_button(
+                label="Download Scope of Work Document",
+                data=st.session_state["scope_work_doc"],
+                file_name="Scope_of_Work_Document.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
     
     elif template_choice == "Painting Estimate Template":
         with st.form("painting_estimate_form"):
@@ -867,12 +893,14 @@ with tabs[2]:
                     "labor_costs": labor_costs
                 }
                 doc_bytes = generate_painting_estimate_report(form_data)
-                st.download_button(
-                    label="Download Painting Estimate Document",
-                    data=doc_bytes,
-                    file_name="Painting_Estimate_Document.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
+                st.session_state["painting_estimate_doc"] = doc_bytes
+        if "painting_estimate_doc" in st.session_state:
+            st.download_button(
+                label="Download Painting Estimate Document",
+                data=st.session_state["painting_estimate_doc"],
+                file_name="Painting_Estimate_Document.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
     
     elif template_choice == "Roofing Estimate Template":
         with st.form("roofing_estimate_form"):
@@ -889,12 +917,14 @@ with tabs[2]:
                     "estimated_cost": estimated_cost
                 }
                 doc_bytes = generate_roofing_estimate_report(form_data)
-                st.download_button(
-                    label="Download Roofing Estimate Document",
-                    data=doc_bytes,
-                    file_name="Roofing_Estimate_Document.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
+                st.session_state["roofing_estimate_doc"] = doc_bytes
+        if "roofing_estimate_doc" in st.session_state:
+            st.download_button(
+                label="Download Roofing Estimate Document",
+                data=st.session_state["roofing_estimate_doc"],
+                file_name="Roofing_Estimate_Document.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
     
     st.markdown("---")
     st.markdown("### Export Data")
@@ -911,4 +941,4 @@ with tabs[2]:
     st.download_button(label="Download Filtered Data as Excel", data=excel_data, file_name="filtered_construction_data.xlsx", mime="application/vnd.ms-excel")
     
 st.markdown("---")
-st.markdown("Developed with a forward-thinking, data-driven approach. Enjoy tracking your construction project!")
+st.markdown("CMBP Analytics_2")
