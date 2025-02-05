@@ -9,7 +9,7 @@ from docx import Document
 # ---------------------------------------------------
 # App Configuration
 # ---------------------------------------------------
-st.set_page_config(page_title="Construction Project Manager Dashboard", layout="wide")
+st.set_page_config(page_title="Construction Project Manager Dashboard II", layout="wide")
 st.title("Construction Project Manager Dashboard")
 st.markdown(
     "This dashboard provides an  overview of the project—including task snapshots, timeline visualization, and detailed reports. Use the sidebar to filter the data."
