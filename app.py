@@ -3,7 +3,6 @@ import pandas as pd
 import plotly.express as px
 import io
 import os
-import base64
 from datetime import datetime
 from docx import Document
 
@@ -48,7 +47,7 @@ def load_data(file_path):
 DATA_FILE = "construction_timeline.xlsx"
 df = load_data(DATA_FILE)
 
-# Make sure we save any new columns to the file right away, so they're permanent
+# Make sure we save any new columns to the file right away (in case they're newly created).
 df.to_excel(DATA_FILE, index=False)
 
 # ---------------------------------------------------
@@ -91,7 +90,7 @@ column_config = {
         options=["Delivered", "Not Delivered"],
         help="Indicates if the item/material has been delivered or not."
     )
-    # "Image" can just be left as a text column (we store the file name).
+    # "Image" remains a free-form text field for storing filenames.
 }
 
 edited_df = st.data_editor(
@@ -143,7 +142,7 @@ with st.form("add_row_form", clear_on_submit=True):
             with open(os.path.join("uploaded_images", img_filename), "wb") as f:
                 f.write(uploaded_file.getbuffer())
         
-        # Append the new row to the DataFrame
+        # Create the new row as a dict
         new_row = {
             "Activity": new_activity,
             "Item": new_item,
@@ -158,7 +157,9 @@ with st.form("add_row_form", clear_on_submit=True):
             "Progress": new_progress,
             "Image": img_filename
         }
-        edited_df = edited_df.append(new_row, ignore_index=True)
+        # Instead of .append(), use pd.concat
+        new_row_df = pd.DataFrame([new_row])
+        edited_df = pd.concat([edited_df, new_row_df], ignore_index=True)
 
         # Save to Excel
         try:
@@ -212,7 +213,7 @@ selected_statuses = st.sidebar.multiselect(
 
 show_finished = st.sidebar.checkbox("Show Finished Tasks", value=True)
 
-# Instead of a simple checkbox, let's do a radio: Color By "Status" or "Progress"
+# Instead of a simple checkbox, a radio: Color By "Status" or "Progress"
 color_mode = st.sidebar.radio("Color Gantt By:", ["Status", "Progress"])
 
 st.sidebar.markdown("**Refine Gantt Grouping**")
@@ -520,6 +521,7 @@ with tabs[2]:
         document.add_paragraph(f"Report generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         document.add_heading("Daily Tasks", level=1)
 
+        # Adjust the number of columns as desired.
         table = document.add_table(rows=1, cols=8)
         hdr_cells = table.rows[0].cells
         hdr_cells[0].text = "Activity"
@@ -610,7 +612,7 @@ with tabs[2]:
     # Additional Templates Section
     st.markdown("### Additional Templates")
 
-    ############# Template Generators #############
+    # Template Generator Functions
     def generate_work_order_report(form_data):
         doc = Document()
         doc.add_heading("Work Order", 0)
@@ -744,8 +746,6 @@ with tabs[2]:
         doc.save(f)
         return f.getvalue()
 
-    ##############################################
-
     template_choice = st.selectbox(
         "Select Template to Generate",
         options=[
@@ -763,7 +763,6 @@ with tabs[2]:
         ]
     )
 
-    # Example: Work Order Template
     if template_choice == "Work Order Template":
         with st.form("work_order_form"):
             work_order_number = st.text_input("Work Order Number")
@@ -782,7 +781,6 @@ with tabs[2]:
                 }
                 doc_bytes = generate_work_order_report(form_data)
                 st.session_state["work_order_doc"] = doc_bytes
-
         if "work_order_doc" in st.session_state:
             st.download_button(
                 label="Download Work Order Document",
@@ -791,7 +789,7 @@ with tabs[2]:
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             )
 
-    # Similarly handle other template choices:
+    # Similarly handle other template choices...
     elif template_choice == "Risk Register Template":
         with st.form("risk_register_form"):
             risk_id = st.text_input("Risk ID")
