@@ -5,6 +5,11 @@ import io
 import os
 from datetime import datetime
 
+# -----------------------------
+# IMPORTANT: Set page config FIRST
+# -----------------------------
+st.set_page_config(page_title="Construction Dashboard", layout="wide")
+
 # ------------------------------------
 # 1) Load Excel + Ensure columns
 # ------------------------------------
@@ -47,7 +52,6 @@ df_original.to_excel(DATA_FILE, index=False)
 # ------------------------------------
 # 2) Streamlit Title & Setup
 # ------------------------------------
-st.set_page_config(page_title="Construction Dashboard", layout="wide")
 st.title("Construction Project Manager - Dashboard")
 
 st.markdown("""
@@ -69,7 +73,6 @@ Use this table to edit existing rows.
 - **Image**: normally shows the filename. We'll display actual images in the gallery below.  
 """)
 
-# We'll copy df_original to "edited_df" for the data editor
 edited_df = st.data_editor(
     df_original,
     use_container_width=True,
@@ -217,6 +220,9 @@ if len(selected_date_range) == 2:
 st.subheader("Gantt Chart (by Activity, color by Average Progress)")
 
 def create_gantt(df_in: pd.DataFrame):
+    if "Activity" not in df_in.columns or df_in.empty:
+        return None
+    
     # For each Activity, find min(Start Date), max(End Date), avg(Progress)
     agg = df_in.groupby("Activity").agg({
         "Start Date": "min",
@@ -224,7 +230,6 @@ def create_gantt(df_in: pd.DataFrame):
         "Progress": "mean"
     }).reset_index()
 
-    # If no data after filtering, return an empty placeholder
     if agg.empty:
         return None
 
