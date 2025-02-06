@@ -24,11 +24,9 @@ def load_data(file_path):
         st.error(f"File {file_path} not found!")
         st.stop()
     df = pd.read_excel(file_path)
-    # Clean column names and convert date columns
     df.columns = df.columns.str.strip()
     df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce")
     df["End Date"] = pd.to_datetime(df["End Date"], errors="coerce")
-    # Ensure Status is a string
     df["Status"] = df["Status"].astype(str)
     return df
 
@@ -63,7 +61,7 @@ if st.button("Save Updates"):
     try:
         edited_df.to_excel(DATA_FILE, index=False)
         st.success("Data successfully saved!")
-        load_data.clear()  # Clear cache so next load uses updated data
+        load_data.clear()
     except Exception as e:
         st.error(f"Error saving data: {e}")
 
@@ -71,7 +69,6 @@ if st.button("Save Updates"):
 # 2b. Manage Columns: Add and Delete Options
 # ---------------------------------------------------
 st.sidebar.header("Manage Columns")
-# Add New Column Form
 with st.sidebar.form("add_column_form"):
     new_col_name = st.text_input("New Column Name")
     default_val = st.text_input("Default Value", value="")
@@ -94,12 +91,8 @@ with st.sidebar.form("add_column_form"):
             except Exception as e:
                 st.sidebar.error(f"Error adding column: {e}")
 
-# Define default columns that should never be deleted.
 default_columns = {"Activity", "Item", "Task", "Room", "Location", "Notes", "Start Date", "End Date", "Status", "Workdays"}
-
-# Delete Column Form: only list columns that are NOT in the default set.
 with st.sidebar.form("delete_column_form"):
-    # Compute additional (newly added) columns only.
     additional_columns = [col for col in edited_df.columns if col not in default_columns]
     if additional_columns:
         cols_to_delete = st.multiselect("Select Newly Added Columns to Delete", options=additional_columns)
@@ -122,7 +115,6 @@ with st.sidebar.form("delete_column_form"):
     else:
         st.sidebar.info("No additional columns available for deletion.")
 
-
 # ---------------------------------------------------
 # 3. Sidebar Filters & Options (Reordered: Activity, Item, Task, Room)
 # ---------------------------------------------------
@@ -140,8 +132,10 @@ selected_room_norm = st.sidebar.multiselect("Select Room (leave empty for all)",
 status_options = norm_unique("Status")
 selected_statuses = st.sidebar.multiselect("Select Status (leave empty for all)", options=status_options, default=[])
 show_finished = st.sidebar.checkbox("Show Finished Tasks", value=True)
-color_by_status = st.sidebar.checkbox("Color-code Gantt Chart by Activity Status", value=True)
-granular_view = st.sidebar.checkbox("Refine view by Task and Item", value=False)
+# --- New: Independent refine options ---
+refine_by_task = st.sidebar.checkbox("Refine by Task", value=False)
+refine_by_item = st.sidebar.checkbox("Refine by Item", value=False)
+refine_by_room = st.sidebar.checkbox("Refine by Room", value=False)
 min_date = edited_df["Start Date"].min()
 max_date = edited_df["End Date"].max()
 selected_date_range = st.sidebar.date_input("Select Date Range", value=[min_date, max_date])
@@ -193,120 +187,72 @@ def aggregated_status(group_df):
 
 # ---------------------------------------------------
 # 6. Gantt Chart Generation
+#    Grouping: always group by Activity plus any refine options selected.
 # ---------------------------------------------------
-def create_gantt_chart(df_filtered, color_by_status=False, granular_view=False):
+def create_gantt_chart(df_filtered, color_by_status=False):
+    group_cols = ["Activity"]
+    if refine_by_room:
+        group_cols.append("Room")
+    if refine_by_item:
+        group_cols.append("Item")
+    if refine_by_task:
+        group_cols.append("Task")
+        
     if color_by_status:
-        if granular_view:
-            group_cols = ["Activity", "Room", "Item", "Task"]
-            agg_df = df_filtered.groupby(group_cols).agg({
-                "Start Date": "min",
-                "End Date": "max"
-            }).reset_index()
-            def compute_group_status(row):
-                cond = (df_filtered["Activity"] == row["Activity"]) & \
-                       (df_filtered["Room"] == row["Room"]) & \
-                       (df_filtered["Item"] == row["Item"]) & \
-                       (df_filtered["Task"] == row["Task"])
-                subset = df_filtered[cond]
-                return aggregated_status(subset)
-            agg_df["Display Status"] = agg_df.apply(compute_group_status, axis=1)
-            agg_df["Group Label"] = agg_df["Activity"] + " | " + agg_df["Room"] + " | " + agg_df["Item"] + " | " + agg_df["Task"]
-            color_discrete_map = {
-                "Not Started": "lightgray",
-                "In Progress": "blue",
-                "Finished On Time": "green",
-                "Finished Late": "orange"
-            }
-            fig = px.timeline(
-                agg_df,
-                x_start="Start Date",
-                x_end="End Date",
-                y="Group Label",
-                color="Display Status",
-                color_discrete_map=color_discrete_map,
-                title="Granular Task Timeline (Color-coded by Status)"
-            )
-            fig.update_layout(yaxis_title="Activity | Room | Item | Task")
-        else:
-            agg_df = df_filtered.groupby("Activity").agg({
-                "Start Date": "min",
-                "End Date": "max"
-            }).reset_index()
-            def compute_activity_status(activity):
-                subset = df_filtered[df_filtered["Activity"] == activity]
-                return aggregated_status(subset)
-            agg_df["Display Status"] = agg_df["Activity"].apply(compute_activity_status)
-            color_discrete_map = {
-                "Not Started": "lightgray",
-                "In Progress": "blue",
-                "Finished On Time": "green",
-                "Finished Late": "orange"
-            }
-            fig = px.timeline(
-                agg_df,
-                x_start="Start Date",
-                x_end="End Date",
-                y="Activity",
-                color="Display Status",
-                color_discrete_map=color_discrete_map,
-                title="Activity Timeline (Color-coded by Status)"
-            )
-            fig.update_layout(yaxis_title="Activity")
+        agg_df = df_filtered.groupby(group_cols).agg({
+            "Start Date": "min",
+            "End Date": "max"
+        }).reset_index()
+        def compute_group_status(row):
+            cond = True
+            for col in group_cols:
+                cond &= (df_filtered[col] == row[col])
+            subset = df_filtered[cond]
+            return aggregated_status(subset)
+        agg_df["Display Status"] = agg_df.apply(compute_group_status, axis=1)
+        agg_df["Group Label"] = agg_df[group_cols].apply(lambda x: " | ".join(x.astype(str)), axis=1)
+        y_axis_label = " | ".join(group_cols)
+        color_discrete_map = {
+            "Not Started": "lightgray",
+            "In Progress": "blue",
+            "Finished On Time": "green",
+            "Finished Late": "orange"
+        }
+        fig = px.timeline(
+            agg_df,
+            x_start="Start Date",
+            x_end="End Date",
+            y="Group Label",
+            color="Display Status",
+            color_discrete_map=color_discrete_map,
+            title="Gantt Chart (Color-coded by Status)"
+        )
+        fig.update_layout(yaxis_title=y_axis_label)
     else:
-        if granular_view:
-            group_cols = ["Activity", "Room", "Item", "Task"]
-            agg_df = df_filtered.groupby(group_cols)[["Start Date", "End Date"]].agg({
-                "Start Date": "min",
-                "End Date": "max"
-            }).reset_index()
-            agg_df["Group Label"] = agg_df["Activity"] + " | " + agg_df["Room"] + " | " + agg_df["Item"] + " | " + agg_df["Task"]
-            fig = px.timeline(
-                agg_df,
-                x_start="Start Date",
-                x_end="End Date",
-                y="Group Label",
-                color="Activity",
-                hover_data=group_cols,
-                title="Granular Activity Timeline"
-            )
-            fig.update_layout(yaxis_title="Activity | Room | Item | Task")
-        else:
-            group_cols = ["Activity", "Room"] if selected_room_norm else ["Activity"]
-            agg_df = df_filtered.groupby(group_cols).agg({
-                "Start Date": "min",
-                "End Date": "max",
-                "Task": lambda x: ", ".join(sorted(set(x.dropna()))),
-                "Item": lambda x: ", ".join(sorted(set(x.dropna())))
-            }).reset_index()
-            agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
-            if "Room" in group_cols:
-                agg_df["Activity_Room"] = agg_df["Activity"] + " (" + agg_df["Room"] + ")"
-                fig = px.timeline(
-                    agg_df,
-                    x_start="Start Date",
-                    x_end="End Date",
-                    y="Activity_Room",
-                    color="Activity",
-                    hover_data=["Items", "Tasks"],
-                    title="Activity & Room Timeline"
-                )
-                fig.update_layout(yaxis_title="Activity (Room)")
-            else:
-                fig = px.timeline(
-                    agg_df,
-                    x_start="Start Date",
-                    x_end="End Date",
-                    y="Activity",
-                    color="Activity",
-                    hover_data=["Items", "Tasks"],
-                    title="Activity Timeline"
-                )
-                fig.update_layout(yaxis_title="Activity")
+        agg_df = df_filtered.groupby(group_cols).agg({
+            "Start Date": "min",
+            "End Date": "max",
+            "Task": lambda x: ", ".join(sorted(set(x.dropna()))),
+            "Item": lambda x: ", ".join(sorted(set(x.dropna())))
+        }).reset_index()
+        agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
+        agg_df["Group Label"] = agg_df[group_cols].apply(lambda x: " | ".join(x.astype(str)), axis=1)
+        y_axis_label = " | ".join(group_cols)
+        fig = px.timeline(
+            agg_df,
+            x_start="Start Date",
+            x_end="End Date",
+            y="Group Label",
+            color="Activity",
+            hover_data=["Tasks", "Items"],
+            title="Gantt Chart"
+        )
+        fig.update_layout(yaxis_title=y_axis_label)
     fig.update_yaxes(autorange="reversed")
-    fig.update_layout(xaxis_title="Timeline")
+    fig.update_layout(xaxis_title="Timeline", template="plotly_white")
     return fig
 
-gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status, granular_view=granular_view)
+gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status)
 
 # ---------------------------------------------------
 # 7. Overall Completion & Progress Bar Calculation
@@ -336,8 +282,7 @@ status_summary = status_summary.sort_values("Order").drop("Order", axis=1)
 # 9. Additional Dashboard Features
 # ---------------------------------------------------
 today = pd.Timestamp(datetime.today().date())
-overdue_df = df_filtered[(df_filtered["End Date"] < today) &
-                         (df_filtered["Status"].str.strip().str.lower() != "finished")]
+overdue_df = df_filtered[(df_filtered["End Date"] < today) & (df_filtered["Status"].str.strip().str.lower() != "finished")]
 overdue_count = overdue_df.shape[0]
 task_distribution = df_filtered.groupby("Activity").size().reset_index(name="Task Count")
 dist_fig = px.bar(task_distribution, x="Activity", y="Task Count", title="Task Distribution by Activity")
@@ -370,13 +315,14 @@ tabs = st.tabs(["Dashboard", "Detailed Summary", "Reports"])
 # ---------- Dashboard Tab ----------
 with tabs[0]:
     st.header("Dashboard Overview")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Current Tasks Snapshot")
-        st.dataframe(df_filtered)
-    with col2:
-        st.subheader("Project Timeline")
-        st.plotly_chart(gantt_fig, use_container_width=True)
+    # Instead of a side-by-side layout, display vertically so that filters remain visible
+    st.subheader("Current Tasks Snapshot")
+    st.dataframe(df_filtered)
+    st.markdown("---")
+    st.subheader("Project Timeline")
+    # Pass configuration to remove the fullscreen toggle
+    st.plotly_chart(gantt_fig, use_container_width=True, config={'modeBarButtonsToRemove': ['toggleFullscreen']})
+    st.markdown("---")
     st.metric("Overall Completion", f"{completion_percentage:.1f}%")
     st.progress(completion_percentage / 100)
     st.markdown("#### Additional Insights")
@@ -402,7 +348,7 @@ with tabs[0]:
         st.dataframe(notes_df[["Activity", "Room", "Task", "Notes"]])
     else:
         st.info("No additional comments or notes.")
-    st.markdown("Use the filters on the sidebar to adjust the view.")
+    st.markdown("Use the sidebar filters to adjust the view.")
 
 # ---------- Detailed Summary Tab ----------
 with tabs[1]:
@@ -415,7 +361,6 @@ with tabs[1]:
 # ---------- Reports Tab ----------
 with tabs[2]:
     st.header("Reports")
-    # Construction Daily Report Section
     st.markdown("### Construction Daily Report")
     def generate_daily_report(df):
         document = Document()
@@ -441,7 +386,7 @@ with tabs[2]:
         f = io.BytesIO()
         document.save(f)
         return f.getvalue()
-
+    
     daily_report = generate_daily_report(df_filtered)
     st.download_button(
         label="Download Daily Report as Word Document",
@@ -449,10 +394,20 @@ with tabs[2]:
         file_name="Construction_Daily_Report.docx",
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
-
+    
     st.markdown("---")
-
-    # Change Order Template Section
+    
+    with open(DATA_FILE, "rb") as file:
+        entire_excel = file.read()
+    st.download_button(
+        label="Download Entire Excel File",
+        data=entire_excel,
+        file_name=DATA_FILE,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    
+    st.markdown("---")
+    
     st.markdown("### Change Order Template")
     with st.form("change_order_form"):
         change_order_number = st.text_input("Change Order Number")
@@ -497,293 +452,10 @@ with tabs[2]:
             file_name="Change_Order_Document.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
-
+    
     st.markdown("---")
-
-    # Additional Templates Section
-    st.markdown("### Additional Templates")
-    template_choice = st.selectbox("Select Template to Generate", options=[
-        "Work Order Template",
-        "Risk Register Template",
-        "Request for Quote (RFQ) Template",
-        "Request for Proposal (RFP) Template",
-        "Request for Information (RFI) Template",
-        "Schedule of Values Template",
-        "Contractor Estimate Template",
-        "Construction Quote Template",
-        "Scope of Work Template",
-        "Painting Estimate Template",
-        "Roofing Estimate Template"
-    ])
-
-    if template_choice == "Work Order Template":
-        with st.form("work_order_form"):
-            work_order_number = st.text_input("Work Order Number")
-            contractor = st.text_input("Contractor")
-            description = st.text_area("Work Description")
-            tasks_input = st.text_area("Assigned Tasks")
-            due_date = st.date_input("Due Date", value=datetime.today())
-            submitted = st.form_submit_button("Generate Work Order Document")
-            if submitted:
-                form_data = {
-                    "work_order_number": work_order_number,
-                    "contractor": contractor,
-                    "description": description,
-                    "tasks": tasks_input,
-                    "due_date": due_date.strftime("%Y-%m-%d")
-                }
-                doc_bytes = generate_work_order_report(form_data)
-                st.session_state["work_order_doc"] = doc_bytes
-        if "work_order_doc" in st.session_state:
-            st.download_button(
-                label="Download Work Order Document",
-                data=st.session_state["work_order_doc"],
-                file_name="Work_Order_Document.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            )
-
-    elif template_choice == "Risk Register Template":
-        with st.form("risk_register_form"):
-            risk_id = st.text_input("Risk ID")
-            description = st.text_area("Risk Description")
-            impact = st.text_input("Impact")
-            likelihood = st.text_input("Likelihood")
-            mitigation = st.text_area("Mitigation Plan")
-            submitted = st.form_submit_button("Generate Risk Register Document")
-            if submitted:
-                form_data = {
-                    "risk_id": risk_id,
-                    "description": description,
-                    "impact": impact,
-                    "likelihood": likelihood,
-                    "mitigation": mitigation
-                }
-                doc_bytes = generate_risk_register_report(form_data)
-                st.session_state["risk_register_doc"] = doc_bytes
-        if "risk_register_doc" in st.session_state:
-            st.download_button(
-                label="Download Risk Register Document",
-                data=st.session_state["risk_register_doc"],
-                file_name="Risk_Register_Document.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            )
-
-    elif template_choice == "Request for Quote (RFQ) Template":
-        with st.form("rfq_form"):
-            quotation_number = st.text_input("Quotation Number")
-            customer_id = st.text_input("Customer ID")
-            company_name = st.text_input("Company Name")
-            requested = st.text_area("Requested Items/Services")
-            validity = st.text_input("Quote Validity (days)")
-            submitted = st.form_submit_button("Generate RFQ Document")
-            if submitted:
-                form_data = {
-                    "quotation_number": quotation_number,
-                    "customer_id": customer_id,
-                    "company_name": company_name,
-                    "requested": requested,
-                    "validity": validity
-                }
-                doc_bytes = generate_rfq_report(form_data)
-                st.session_state["rfq_doc"] = doc_bytes
-        if "rfq_doc" in st.session_state:
-            st.download_button(
-                label="Download RFQ Document",
-                data=st.session_state["rfq_doc"],
-                file_name="RFQ_Document.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            )
-
-    elif template_choice == "Request for Proposal (RFP) Template":
-        with st.form("rfp_form"):
-            rfp_number = st.text_input("RFP Number")
-            background = st.text_area("Project Background")
-            scope = st.text_area("Scope of Work")
-            timeline = st.text_input("Timeline")
-            deadline = st.date_input("Submission Deadline", value=datetime.today())
-            submitted = st.form_submit_button("Generate RFP Document")
-            if submitted:
-                form_data = {
-                    "rfp_number": rfp_number,
-                    "background": background,
-                    "scope": scope,
-                    "timeline": timeline,
-                    "deadline": deadline.strftime("%Y-%m-%d")
-                }
-                doc_bytes = generate_rfp_report(form_data)
-                st.session_state["rfp_doc"] = doc_bytes
-        if "rfp_doc" in st.session_state:
-            st.download_button(
-                label="Download RFP Document",
-                data=st.session_state["rfp_doc"],
-                file_name="RFP_Document.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            )
-
-    elif template_choice == "Request for Information (RFI) Template":
-        with st.form("rfi_form"):
-            rfi_number = st.text_input("RFI Number")
-            subject = st.text_input("Subject")
-            question = st.text_area("Question")
-            response_date = st.date_input("Requested Response Date", value=datetime.today())
-            submitted = st.form_submit_button("Generate RFI Document")
-            if submitted:
-                form_data = {
-                    "rfi_number": rfi_number,
-                    "subject": subject,
-                    "question": question,
-                    "response_date": response_date.strftime("%Y-%m-%d")
-                }
-                doc_bytes = generate_rfi_report(form_data)
-                st.session_state["rfi_doc"] = doc_bytes
-        if "rfi_doc" in st.session_state:
-            st.download_button(
-                label="Download RFI Document",
-                data=st.session_state["rfi_doc"],
-                file_name="RFI_Document.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            )
-
-    elif template_choice == "Schedule of Values Template":
-        with st.form("schedule_values_form"):
-            project = st.text_input("Project Name")
-            total_amount = st.text_input("Total Contract Amount")
-            breakdown = st.text_area("Task Breakdown (list tasks and amounts)")
-            submitted = st.form_submit_button("Generate Schedule of Values Document")
-            if submitted:
-                form_data = {
-                    "project": project,
-                    "total_amount": total_amount,
-                    "breakdown": breakdown
-                }
-                doc_bytes = generate_schedule_of_values_report(form_data)
-                st.session_state["schedule_doc"] = doc_bytes
-        if "schedule_doc" in st.session_state:
-            st.download_button(
-                label="Download Schedule of Values Document",
-                data=st.session_state["schedule_doc"],
-                file_name="Schedule_of_Values_Document.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            )
-
-    elif template_choice == "Contractor Estimate Template":
-        with st.form("contractor_estimate_form"):
-            estimate_number = st.text_input("Estimate Number")
-            project = st.text_input("Project Name")
-            material_costs = st.text_input("Estimated Material Costs")
-            labor_costs = st.text_input("Estimated Labor Costs")
-            submitted = st.form_submit_button("Generate Contractor Estimate Document")
-            if submitted:
-                form_data = {
-                    "estimate_number": estimate_number,
-                    "project": project,
-                    "material_costs": material_costs,
-                    "labor_costs": labor_costs
-                }
-                doc_bytes = generate_contractor_estimate_report(form_data)
-                st.session_state["contractor_estimate_doc"] = doc_bytes
-        if "contractor_estimate_doc" in st.session_state:
-            st.download_button(
-                label="Download Contractor Estimate Document",
-                data=st.session_state["contractor_estimate_doc"],
-                file_name="Contractor_Estimate_Document.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            )
-
-    elif template_choice == "Construction Quote Template":
-        with st.form("construction_quote_form"):
-            quote_number = st.text_input("Quote Number")
-            project = st.text_input("Project Name")
-            total_cost = st.text_input("Estimated Total Cost")
-            submitted = st.form_submit_button("Generate Construction Quote Document")
-            if submitted:
-                form_data = {
-                    "quote_number": quote_number,
-                    "project": project,
-                    "total_cost": total_cost
-                }
-                doc_bytes = generate_construction_quote_report(form_data)
-                st.session_state["construction_quote_doc"] = doc_bytes
-        if "construction_quote_doc" in st.session_state:
-            st.download_button(
-                label="Download Construction Quote Document",
-                data=st.session_state["construction_quote_doc"],
-                file_name="Construction_Quote_Document.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            )
-
-    elif template_choice == "Scope of Work Template":
-        with st.form("scope_work_form"):
-            project_name = st.text_input("Project Name")
-            scope_details = st.text_area("Scope Details")
-            milestones = st.text_area("Milestones and Deliverables")
-            submitted = st.form_submit_button("Generate Scope of Work Document")
-            if submitted:
-                form_data = {
-                    "project_name": project_name,
-                    "scope_details": scope_details,
-                    "milestones": milestones
-                }
-                doc_bytes = generate_scope_of_work_report(form_data)
-                st.session_state["scope_work_doc"] = doc_bytes
-        if "scope_work_doc" in st.session_state:
-            st.download_button(
-                label="Download Scope of Work Document",
-                data=st.session_state["scope_work_doc"],
-                file_name="Scope_of_Work_Document.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            )
-
-    elif template_choice == "Painting Estimate Template":
-        with st.form("painting_estimate_form"):
-            estimate_number = st.text_input("Estimate Number")
-            project = st.text_input("Project/Location")
-            material_costs = st.text_input("Estimated Material Costs")
-            labor_costs = st.text_input("Estimated Labor Costs")
-            submitted = st.form_submit_button("Generate Painting Estimate Document")
-            if submitted:
-                form_data = {
-                    "estimate_number": estimate_number,
-                    "project": project,
-                    "material_costs": material_costs,
-                    "labor_costs": labor_costs
-                }
-                doc_bytes = generate_painting_estimate_report(form_data)
-                st.session_state["painting_estimate_doc"] = doc_bytes
-        if "painting_estimate_doc" in st.session_state:
-            st.download_button(
-                label="Download Painting Estimate Document",
-                data=st.session_state["painting_estimate_doc"],
-                file_name="Painting_Estimate_Document.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            )
-
-    elif template_choice == "Roofing Estimate Template":
-        with st.form("roofing_estimate_form"):
-            estimate_number = st.text_input("Estimate Number")
-            area = st.text_input("Total Area (sq ft)")
-            materials = st.text_input("Material Specification")
-            estimated_cost = st.text_input("Estimated Cost")
-            submitted = st.form_submit_button("Generate Roofing Estimate Document")
-            if submitted:
-                form_data = {
-                    "estimate_number": estimate_number,
-                    "area": area,
-                    "materials": materials,
-                    "estimated_cost": estimated_cost
-                }
-                doc_bytes = generate_roofing_estimate_report(form_data)
-                st.session_state["roofing_estimate_doc"] = doc_bytes
-        if "roofing_estimate_doc" in st.session_state:
-            st.download_button(
-                label="Download Roofing Estimate Document",
-                data=st.session_state["roofing_estimate_doc"],
-                file_name="Roofing_Estimate_Document.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            )
-
-    st.markdown("---")
-    st.markdown("### Export Data")
+    
+    st.markdown("### Export Filtered Data")
     def convert_df_to_csv(df):
         return df.to_csv(index=False).encode("utf-8")
     def convert_df_to_excel(df):
@@ -795,6 +467,6 @@ with tabs[2]:
     st.download_button(label="Download Filtered Data as CSV", data=csv_data, file_name="filtered_construction_data.csv", mime="text/csv")
     excel_data = convert_df_to_excel(df_filtered)
     st.download_button(label="Download Filtered Data as Excel", data=excel_data, file_name="filtered_construction_data.xlsx", mime="application/vnd.ms-excel")
-
+    
 st.markdown("---")
 st.markdown("CMBP Analytics II")
