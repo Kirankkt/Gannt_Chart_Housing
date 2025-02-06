@@ -46,6 +46,7 @@ st.markdown(
     **Finished**, **In Progress**, or **Not Started**.
     """
 )
+# Updated dropdown options to include "Not Started"
 column_config = {
     "Status": st.column_config.SelectboxColumn(
         "Status",
@@ -54,7 +55,7 @@ column_config = {
     )
 }
 edited_df = st.data_editor(df, column_config=column_config, use_container_width=True)
-# Default blank or null values to "Not Started"
+# If the cell is empty or null, default it to "Not Started"
 edited_df["Status"] = edited_df["Status"].fillna("Not Started").replace("", "Not Started")
 
 # ---------------------------------------------------
@@ -143,13 +144,12 @@ def aggregated_status(group_df):
 def create_gantt_chart(df_filtered, color_by_status=False, granular_view=False):
     if color_by_status:
         if granular_view:
-            # Group by Activity, Room, Item, and Task for a granular view.
+            # Group by Activity, Room, Item, and Task
             group_cols = ["Activity", "Room", "Item", "Task"]
             agg_df = df_filtered.groupby(group_cols).agg({
                 "Start Date": "min",
                 "End Date": "max"
             }).reset_index()
-            # Compute aggregated status for each group.
             def compute_group_status(row):
                 cond = (df_filtered["Activity"] == row["Activity"]) & \
                        (df_filtered["Room"] == row["Room"]) & \
@@ -158,7 +158,6 @@ def create_gantt_chart(df_filtered, color_by_status=False, granular_view=False):
                 subset = df_filtered[cond]
                 return aggregated_status(subset)
             agg_df["Display Status"] = agg_df.apply(compute_group_status, axis=1)
-            # Create a label concatenating the four fields.
             agg_df["Group Label"] = agg_df["Activity"] + " | " + agg_df["Room"] + " | " + agg_df["Item"] + " | " + agg_df["Task"]
             color_discrete_map = {
                 "Not Started": "lightgray",
@@ -204,14 +203,12 @@ def create_gantt_chart(df_filtered, color_by_status=False, granular_view=False):
             fig.update_layout(yaxis_title="Activity")
     else:
         if granular_view:
+            # For granular view without color coding, group by all four fields without aggregating Task and Item
             group_cols = ["Activity", "Room", "Item", "Task"]
-            agg_df = df_filtered.groupby(group_cols).agg({
+            agg_df = df_filtered.groupby(group_cols)[["Start Date", "End Date"]].agg({
                 "Start Date": "min",
-                "End Date": "max",
-                "Task": lambda x: ", ".join(sorted(set(x.dropna()))),
-                "Item": lambda x: ", ".join(sorted(set(x.dropna())))
+                "End Date": "max"
             }).reset_index()
-            agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
             agg_df["Group Label"] = agg_df["Activity"] + " | " + agg_df["Room"] + " | " + agg_df["Item"] + " | " + agg_df["Task"]
             fig = px.timeline(
                 agg_df,
@@ -219,7 +216,7 @@ def create_gantt_chart(df_filtered, color_by_status=False, granular_view=False):
                 x_end="End Date",
                 y="Group Label",
                 color="Activity",
-                hover_data=["Items", "Tasks"],
+                hover_data=group_cols,
                 title="Granular Activity Timeline"
             )
             fig.update_layout(yaxis_title="Activity | Room | Item | Task")
@@ -453,13 +450,12 @@ def generate_roofing_estimate_report(form_data):
 def create_gantt_chart(df_filtered, color_by_status=False, granular_view=False):
     if color_by_status:
         if granular_view:
-            # Group by Activity, Room, Item, and Task
+            # Group by Activity, Room, Item, and Task for granular view
             group_cols = ["Activity", "Room", "Item", "Task"]
             agg_df = df_filtered.groupby(group_cols).agg({
                 "Start Date": "min",
                 "End Date": "max"
             }).reset_index()
-            # Compute aggregated status for each group
             def compute_group_status(row):
                 cond = (df_filtered["Activity"] == row["Activity"]) & \
                        (df_filtered["Room"] == row["Room"]) & \
@@ -468,7 +464,6 @@ def create_gantt_chart(df_filtered, color_by_status=False, granular_view=False):
                 subset = df_filtered[cond]
                 return aggregated_status(subset)
             agg_df["Display Status"] = agg_df.apply(compute_group_status, axis=1)
-            # Concatenate columns to form a detailed label
             agg_df["Group Label"] = agg_df["Activity"] + " | " + agg_df["Room"] + " | " + agg_df["Item"] + " | " + agg_df["Task"]
             color_discrete_map = {
                 "Not Started": "lightgray",
@@ -487,7 +482,7 @@ def create_gantt_chart(df_filtered, color_by_status=False, granular_view=False):
             )
             fig.update_layout(yaxis_title="Activity | Room | Item | Task")
         else:
-            # Aggregate by Activity only (default view)
+            # Default aggregated view by Activity only.
             agg_df = df_filtered.groupby("Activity").agg({
                 "Start Date": "min",
                 "End Date": "max"
@@ -514,14 +509,12 @@ def create_gantt_chart(df_filtered, color_by_status=False, granular_view=False):
             fig.update_layout(yaxis_title="Activity")
     else:
         if granular_view:
+            # When not color-coding and in granular view, group only by the key columns to avoid duplicate column names.
             group_cols = ["Activity", "Room", "Item", "Task"]
-            agg_df = df_filtered.groupby(group_cols).agg({
+            agg_df = df_filtered.groupby(group_cols)[["Start Date", "End Date"]].agg({
                 "Start Date": "min",
-                "End Date": "max",
-                "Task": lambda x: ", ".join(sorted(set(x.dropna()))),
-                "Item": lambda x: ", ".join(sorted(set(x.dropna())))
+                "End Date": "max"
             }).reset_index()
-            agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
             agg_df["Group Label"] = agg_df["Activity"] + " | " + agg_df["Room"] + " | " + agg_df["Item"] + " | " + agg_df["Task"]
             fig = px.timeline(
                 agg_df,
@@ -529,7 +522,7 @@ def create_gantt_chart(df_filtered, color_by_status=False, granular_view=False):
                 x_end="End Date",
                 y="Group Label",
                 color="Activity",
-                hover_data=["Items", "Tasks"],
+                hover_data=group_cols,
                 title="Granular Activity Timeline"
             )
             fig.update_layout(yaxis_title="Activity | Room | Item | Task")
