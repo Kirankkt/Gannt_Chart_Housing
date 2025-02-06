@@ -9,7 +9,7 @@ from docx import Document
 # ---------------------------------------------------
 # App Configuration
 # ---------------------------------------------------
-st.set_page_config(page_title="Construction Project Manager Dashboard ", layout="wide")
+st.set_page_config(page_title="Construction Project Manager Dashboard", layout="wide")
 st.title("Construction Project Manager Dashboard II")
 st.markdown(
     "This dashboard provides an overview of the project—including task snapshots, timeline visualization, and detailed reports. Use the sidebar to filter the data."
@@ -46,7 +46,6 @@ st.markdown(
     **Finished**, **In Progress**, or **Not Started**.
     """
 )
-# Updated dropdown options to include "Not Started"
 column_config = {
     "Status": st.column_config.SelectboxColumn(
         "Status",
@@ -70,9 +69,10 @@ if st.button("Save Updates"):
         st.error(f"Error saving data: {e}")
 
 # ---------------------------------------------------
-# 2b. Add New Column Option
+# 2b. Manage Columns: Add and Delete Options
 # ---------------------------------------------------
-st.sidebar.header("Add New Column")
+default_columns = {"Activity", "Item", "Task", "Room", "Location", "Notes", "Start Date", "End Date", "Status", "Workdays"}
+st.sidebar.header("Manage Columns")
 with st.sidebar.form("add_column_form"):
     new_col_name = st.text_input("New Column Name")
     default_val = st.text_input("Default Value", value="")
@@ -83,38 +83,53 @@ with st.sidebar.form("add_column_form"):
         elif new_col_name in edited_df.columns:
             st.sidebar.error(f"Column '{new_col_name}' already exists.")
         else:
-            # Add the new column with the default value
             edited_df[new_col_name] = default_val
             try:
                 edited_df.to_excel(DATA_FILE, index=False)
                 st.sidebar.success(f"Column '{new_col_name}' added successfully!")
-                load_data.clear()  # Clear cache so the updated file is reloaded next time
+                load_data.clear()
             except Exception as e:
                 st.sidebar.error(f"Error adding column: {e}")
 
+# Allow deletion only for columns that are not default
+additional_columns = [col for col in edited_df.columns if col not in default_columns]
+if additional_columns:
+    with st.sidebar.form("delete_column_form"):
+        cols_to_delete = st.multiselect("Select Columns to Delete", options=additional_columns)
+        delete_submitted = st.form_submit_button("Delete Selected Columns")
+        if delete_submitted:
+            if not cols_to_delete:
+                st.sidebar.warning("Please select at least one column to delete.")
+            else:
+                edited_df.drop(columns=cols_to_delete, inplace=True)
+                try:
+                    edited_df.to_excel(DATA_FILE, index=False)
+                    st.sidebar.success("Selected columns deleted successfully!")
+                    load_data.clear()
+                except Exception as e:
+                    st.sidebar.error(f"Error deleting columns: {e}")
 
 # ---------------------------------------------------
-# 3. Sidebar Filters & Options
+# 3. Sidebar Filters & Options (Reordered: Activity, Item, Task, Room)
 # ---------------------------------------------------
 st.sidebar.header("Filter Options")
-activities = sorted(edited_df["Activity"].dropna().unique())
-selected_activities = st.sidebar.multiselect("Select Activity (leave empty for all)", options=activities, default=[])
-rooms = sorted(edited_df["Room"].dropna().unique())
-selected_rooms = st.sidebar.multiselect("Select Room (leave empty for all)", options=rooms, default=[])
-# New filters for Item and Task:
-items = sorted(edited_df["Item"].dropna().unique())
-selected_items = st.sidebar.multiselect("Select Item (leave empty for all)", options=items, default=[])
-tasks = sorted(edited_df["Task"].dropna().unique())
-selected_tasks = st.sidebar.multiselect("Select Task (leave empty for all)", options=tasks, default=[])
+# For robust filtering, compute normalized values
+def norm_unique(col):
+    return sorted(set(edited_df[col].dropna().astype(str).str.lower().str.strip()))
+activity_options = norm_unique("Activity")
+selected_activity_norm = st.sidebar.multiselect("Select Activity (leave empty for all)", options=activity_options, default=[])
+item_options = norm_unique("Item")
+selected_item_norm = st.sidebar.multiselect("Select Item (leave empty for all)", options=item_options, default=[])
+task_options = norm_unique("Task")
+selected_task_norm = st.sidebar.multiselect("Select Task (leave empty for all)", options=task_options, default=[])
+room_options = norm_unique("Room")
+selected_room_norm = st.sidebar.multiselect("Select Room (leave empty for all)", options=room_options, default=[])
 
-if edited_df["Status"].notna().sum() > 0:
-    statuses = sorted(edited_df["Status"].dropna().unique())
-    selected_statuses = st.sidebar.multiselect("Select Status (leave empty for all)", options=statuses, default=[])
-else:
-    selected_statuses = []
+# For Status, we assume values are already normalized by our default setting
+status_options = norm_unique("Status")
+selected_statuses = st.sidebar.multiselect("Select Status (leave empty for all)", options=status_options, default=[])
 show_finished = st.sidebar.checkbox("Show Finished Tasks", value=True)
 color_by_status = st.sidebar.checkbox("Color-code Gantt Chart by Activity Status", value=True)
-# New checkbox: refine view by Task and Item
 granular_view = st.sidebar.checkbox("Refine view by Task and Item", value=False)
 min_date = edited_df["Start Date"].min()
 max_date = edited_df["End Date"].max()
@@ -124,22 +139,28 @@ selected_date_range = st.sidebar.date_input("Select Date Range", value=[min_date
 # 4. Filtering the DataFrame Based on User Input
 # ---------------------------------------------------
 df_filtered = edited_df.copy()
-if selected_activities:
-    df_filtered = df_filtered[df_filtered["Activity"].isin(selected_activities)]
-if selected_rooms:
-    df_filtered = df_filtered[df_filtered["Room"].isin(selected_rooms)]
-if selected_items:
-    df_filtered = df_filtered[df_filtered["Item"].isin(selected_items)]
-if selected_tasks:
-    df_filtered = df_filtered[df_filtered["Task"].isin(selected_tasks)]
+# Create normalized columns for filtering
+for col in ["Activity", "Item", "Task", "Room", "Status"]:
+    df_filtered[col + "_norm"] = df_filtered[col].astype(str).str.lower().str.strip()
+
+if selected_activity_norm:
+    df_filtered = df_filtered[df_filtered["Activity_norm"].isin(selected_activity_norm)]
+if selected_item_norm:
+    df_filtered = df_filtered[df_filtered["Item_norm"].isin(selected_item_norm)]
+if selected_task_norm:
+    df_filtered = df_filtered[df_filtered["Task_norm"].isin(selected_task_norm)]
+if selected_room_norm:
+    df_filtered = df_filtered[df_filtered["Room_norm"].isin(selected_room_norm)]
 if selected_statuses:
-    df_filtered = df_filtered[df_filtered["Status"].isin(selected_statuses)]
+    df_filtered = df_filtered[df_filtered["Status_norm"].isin(selected_statuses)]
 if not show_finished:
-    df_filtered = df_filtered[~df_filtered["Status"].str.strip().str.lower().eq("finished")]
+    df_filtered = df_filtered[~df_filtered["Status_norm"].eq("finished")]
 if len(selected_date_range) == 2:
     start_range = pd.to_datetime(selected_date_range[0])
     end_range = pd.to_datetime(selected_date_range[1])
     df_filtered = df_filtered[(df_filtered["Start Date"] >= start_range) & (df_filtered["End Date"] <= end_range)]
+# Drop the normalized helper columns now
+df_filtered.drop(columns=[c for c in df_filtered.columns if c.endswith("_norm")], inplace=True)
 
 # ---------------------------------------------------
 # 5. Helper Function: Compute Aggregated Status for an Activity
@@ -200,7 +221,7 @@ def create_gantt_chart(df_filtered, color_by_status=False, granular_view=False):
             )
             fig.update_layout(yaxis_title="Activity | Room | Item | Task")
         else:
-            # Default aggregated view by Activity only.
+            # Aggregate by Activity only.
             agg_df = df_filtered.groupby("Activity").agg({
                 "Start Date": "min",
                 "End Date": "max"
@@ -227,7 +248,7 @@ def create_gantt_chart(df_filtered, color_by_status=False, granular_view=False):
             fig.update_layout(yaxis_title="Activity")
     else:
         if granular_view:
-            # For granular view without color coding, group by all four fields without aggregating Task and Item
+            # Group by all four fields for granular view without color coding
             group_cols = ["Activity", "Room", "Item", "Task"]
             agg_df = df_filtered.groupby(group_cols)[["Start Date", "End Date"]].agg({
                 "Start Date": "min",
@@ -321,6 +342,11 @@ upcoming_df = df_filtered[(df_filtered["Start Date"] >= upcoming_start) & (df_fi
 filter_summary = []
 if selected_activities:
     filter_summary.append("Activities: " + ", ".join(selected_activities))
+if selected_item_norm:
+    # Display capitalized versions for clarity
+    filter_summary.append("Items: " + ", ".join([s.title() for s in selected_item_norm]))
+if selected_task_norm:
+    filter_summary.append("Tasks: " + ", ".join([s.title() for s in selected_task_norm]))
 if selected_rooms:
     filter_summary.append("Rooms: " + ", ".join(selected_rooms))
 if selected_statuses:
@@ -474,7 +500,6 @@ def generate_roofing_estimate_report(form_data):
 def create_gantt_chart(df_filtered, color_by_status=False, granular_view=False):
     if color_by_status:
         if granular_view:
-            # Group by Activity, Room, Item, and Task for granular view
             group_cols = ["Activity", "Room", "Item", "Task"]
             agg_df = df_filtered.groupby(group_cols).agg({
                 "Start Date": "min",
@@ -506,7 +531,6 @@ def create_gantt_chart(df_filtered, color_by_status=False, granular_view=False):
             )
             fig.update_layout(yaxis_title="Activity | Room | Item | Task")
         else:
-            # Default aggregated view by Activity only.
             agg_df = df_filtered.groupby("Activity").agg({
                 "Start Date": "min",
                 "End Date": "max"
@@ -533,7 +557,6 @@ def create_gantt_chart(df_filtered, color_by_status=False, granular_view=False):
             fig.update_layout(yaxis_title="Activity")
     else:
         if granular_view:
-            # When not color-coding and in granular view, group only by the key columns to avoid duplicate column names.
             group_cols = ["Activity", "Room", "Item", "Task"]
             agg_df = df_filtered.groupby(group_cols)[["Start Date", "End Date"]].agg({
                 "Start Date": "min",
@@ -627,6 +650,10 @@ upcoming_df = df_filtered[(df_filtered["Start Date"] >= upcoming_start) & (df_fi
 filter_summary = []
 if selected_activities:
     filter_summary.append("Activities: " + ", ".join(selected_activities))
+if selected_item_norm:
+    filter_summary.append("Items: " + ", ".join([s.title() for s in selected_item_norm]))
+if selected_task_norm:
+    filter_summary.append("Tasks: " + ", ".join([s.title() for s in selected_task_norm]))
 if selected_rooms:
     filter_summary.append("Rooms: " + ", ".join(selected_rooms))
 if selected_statuses:
