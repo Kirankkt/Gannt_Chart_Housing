@@ -240,7 +240,7 @@ def aggregated_status(group_df):
     return "In Progress"
 
 # ---------------------------------------------------
-# 6. Gantt Chart Generation
+# 6. Gantt Chart Generation (Fix applied here)
 # ---------------------------------------------------
 def create_gantt_chart(df_input, color_by_status=False):
     """
@@ -248,11 +248,11 @@ def create_gantt_chart(df_input, color_by_status=False):
     Always include 'Activity'. Then conditionally add Room, Item, Task.
     """
     group_cols = ["Activity"]
-    if group_by_room:
+    if group_by_room and "Room" in df_input.columns:
         group_cols.append("Room")
-    if group_by_item:
+    if group_by_item and "Item" in df_input.columns:
         group_cols.append("Item")
-    if group_by_task:
+    if group_by_task and "Task" in df_input.columns:
         group_cols.append("Task")
 
     # Prepare a grouped DataFrame
@@ -260,10 +260,12 @@ def create_gantt_chart(df_input, color_by_status=False):
         "Start Date": "min",
         "End Date": "max"
     }
-    # We'll compute the aggregated status if color_by_status is True
+    if not group_cols:
+        # Safety: fallback if somehow no group columns
+        return px.scatter(title="No group columns selected")
+
     if color_by_status:
         # We'll handle color by the computed aggregated status
-        # so first group to get the min/max date
         agg_df = df_input.groupby(group_cols).agg(agg_dict).reset_index()
 
         # For each group, figure out the aggregated status
@@ -276,12 +278,14 @@ def create_gantt_chart(df_input, color_by_status=False):
 
         agg_df["Display Status"] = agg_df.apply(compute_group_status, axis=1)
 
-        # Build a label for the y-axis from the group_cols
+        # Build a label for the y-axis from group_cols
         if len(group_cols) == 1:
-            agg_df["Group Label"] = agg_df["Activity"]
+            agg_df["Group Label"] = agg_df[group_cols[0]].astype(str)
         else:
-            # Join them with " | " for clarity
-            agg_df["Group Label"] = agg_df[group_cols].astype(str).agg(" | ".join, axis=1)
+            # Safely combine columns into one string
+            agg_df["Group Label"] = agg_df[group_cols].apply(
+                lambda row: " | ".join(row.astype(str)), axis=1
+            )
 
         color_discrete_map = {
             "Not Started": "lightgray",
@@ -303,14 +307,15 @@ def create_gantt_chart(df_input, color_by_status=False):
 
     else:
         # If not color by status, color by the top-level grouping dimension, e.g. "Activity"
-        # but the user can group by additional columns
         agg_df = df_input.groupby(group_cols).agg(agg_dict).reset_index()
 
         # Build a label
         if len(group_cols) == 1:
-            agg_df["Group Label"] = agg_df["Activity"]
+            agg_df["Group Label"] = agg_df[group_cols[0]].astype(str)
         else:
-            agg_df["Group Label"] = agg_df[group_cols].astype(str).agg(" | ".join, axis=1)
+            agg_df["Group Label"] = agg_df[group_cols].apply(
+                lambda row: " | ".join(row.astype(str)), axis=1
+            )
 
         fig = px.timeline(
             agg_df,
