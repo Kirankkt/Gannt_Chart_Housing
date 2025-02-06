@@ -70,6 +70,30 @@ if st.button("Save Updates"):
         st.error(f"Error saving data: {e}")
 
 # ---------------------------------------------------
+# 2b. Add New Column Option
+# ---------------------------------------------------
+st.sidebar.header("Add New Column")
+with st.sidebar.form("add_column_form"):
+    new_col_name = st.text_input("New Column Name")
+    default_val = st.text_input("Default Value", value="")
+    add_col_submitted = st.form_submit_button("Add Column")
+    if add_col_submitted:
+        if new_col_name.strip() == "":
+            st.sidebar.error("Please enter a valid column name.")
+        elif new_col_name in edited_df.columns:
+            st.sidebar.error(f"Column '{new_col_name}' already exists.")
+        else:
+            # Add the new column with the default value
+            edited_df[new_col_name] = default_val
+            try:
+                edited_df.to_excel(DATA_FILE, index=False)
+                st.sidebar.success(f"Column '{new_col_name}' added successfully!")
+                load_data.clear()  # Clear cache so the updated file is reloaded next time
+            except Exception as e:
+                st.sidebar.error(f"Error adding column: {e}")
+
+
+# ---------------------------------------------------
 # 3. Sidebar Filters & Options
 # ---------------------------------------------------
 st.sidebar.header("Filter Options")
