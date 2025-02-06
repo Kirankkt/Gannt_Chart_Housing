@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import io
 import os
 from datetime import datetime
 
@@ -9,7 +8,6 @@ from datetime import datetime
 # Must be FIRST: set page config
 #####################
 st.set_page_config(page_title="Robust Construction Dashboard", layout="wide")
-
 
 #####################
 # Helper: Safe rerun fallback
@@ -23,7 +21,6 @@ def safe_rerun():
         st.experimental_rerun()
     else:
         st.info("Please refresh the page to see updated changes.")
-
 
 #####################
 # 1) Load Excel + Ensure Columns
@@ -60,13 +57,11 @@ def load_data(file_path: str) -> pd.DataFrame:
 
     return df
 
-
 DATA_FILE = "construction_timeline.xlsx"
 df_original = load_data(DATA_FILE)
 
 # Write back any newly-created columns (one time) so Excel has them
 df_original.to_excel(DATA_FILE, index=False)
-
 
 #####################
 # 2) Title & Description
@@ -91,13 +86,12 @@ This dashboard includes:
 #####################
 st.subheader("Data Editor: Existing Rows")
 
-# Provide some help text for the new columns
 st.markdown("""
 - **Status**: `Not Started`, `In Progress`, `Finished` (but we also account for "Delayed" if End Date < today and not finished).
 - **Order Status**: `Ordered` / `Not Ordered`
 - **Delivery Status**: `Delivered` / `Not Delivered`
 - **Progress**: integer [0–100]
-- **Image**: filename only (actual image stored in `uploaded_images/`).
+- **Image**: relative file path (e.g., `uploaded_images/filename.jpg`)
 """)
 
 # Define column configs for st.data_editor
@@ -124,7 +118,7 @@ column_config = {
         max_value=100,
         step=1
     ),
-    # For "Image", we keep a text field for filename
+    # For "Image", we keep a text field for the relative file path.
 }
 
 edited_df = st.data_editor(
@@ -144,7 +138,6 @@ if st.button("Save Changes (Data Editor)"):
         safe_rerun()
     except Exception as e:
         st.error(f"Error saving data: {e}")
-
 
 #####################
 # 4) Add New Row
@@ -173,16 +166,19 @@ with st.form("add_row_form", clear_on_submit=True):
 
     submitted = st.form_submit_button("Add Row")
     if submitted:
-        img_filename = ""
+        # Initialize image relative path as an empty string
+        img_relative_path = ""
         if uploaded_file_new is not None:
-            if not os.path.exists("uploaded_images"):
-                os.makedirs("uploaded_images")
+            img_folder = "uploaded_images"
+            if not os.path.exists(img_folder):
+                os.makedirs(img_folder)
             img_filename = uploaded_file_new.name
-            # Save file
-            with open(os.path.join("uploaded_images", img_filename), "wb") as f:
+            img_relative_path = os.path.join(img_folder, img_filename)
+            # Save file using the relative path
+            with open(img_relative_path, "wb") as f:
                 f.write(uploaded_file_new.getbuffer())
 
-        # Build new row
+        # Build new row with relative image path
         new_row = {
             "Activity": new_activity,
             "Item": new_item,
@@ -195,10 +191,10 @@ with st.form("add_row_form", clear_on_submit=True):
             "Start Date": pd.to_datetime(new_start_date),
             "End Date": pd.to_datetime(new_end_date),
             "Notes": new_notes,
-            "Image": img_filename
+            "Image": img_relative_path
         }
 
-        # Concat to existing
+        # Concat to existing data
         new_row_df = pd.DataFrame([new_row])
         updated_df = pd.concat([edited_df, new_row_df], ignore_index=True)
 
@@ -210,40 +206,37 @@ with st.form("add_row_form", clear_on_submit=True):
         except Exception as e:
             st.error(f"Error adding row: {e}")
 
-
 #####################
 # 5) Update Image for Existing Row
 #####################
 st.subheader("Update an Image for an Existing Row")
-
 st.markdown("Pick which row (by index) to update the `Image` file.")
 
 row_indices = [f"Row {i}" for i in range(len(edited_df))]
 chosen_row_str = st.selectbox("Select row index", options=row_indices)
 chosen_index = int(chosen_row_str.replace("Row ", ""))
 
-uploaded_file_existing = st.file_uploader("Upload or replace image", type=["jpg","jpeg","png"], key="existing_upload")
+uploaded_file_existing = st.file_uploader("Upload or replace image", type=["jpg", "jpeg", "png"], key="existing_upload")
 if st.button("Update Image on Row"):
     if uploaded_file_existing is None:
         st.warning("No file selected.")
     else:
-        # Save it locally
-        if not os.path.exists("uploaded_images"):
-            os.makedirs("uploaded_images")
+        img_folder = "uploaded_images"
+        if not os.path.exists(img_folder):
+            os.makedirs(img_folder)
         img_filename = uploaded_file_existing.name
-        with open(os.path.join("uploaded_images", img_filename), "wb") as f:
+        img_relative_path = os.path.join(img_folder, img_filename)
+        with open(img_relative_path, "wb") as f:
             f.write(uploaded_file_existing.getbuffer())
 
-        # Store filename in that row's "Image" column
-        edited_df.loc[chosen_index, "Image"] = img_filename
-        # Save
+        # Update the relative path in the selected row
+        edited_df.loc[chosen_index, "Image"] = img_relative_path
         try:
             edited_df.to_excel(DATA_FILE, index=False)
             st.success(f"Image updated for row {chosen_index}.")
             safe_rerun()
         except Exception as ex:
             st.error(f"Error saving updated image: {ex}")
-
 
 #####################
 # 6) Sidebar Filters & Options
@@ -270,16 +263,13 @@ selected_statuses = st.sidebar.multiselect("Select Status", status_opts, default
 
 show_finished = st.sidebar.checkbox("Show Finished Tasks?", value=True)
 
-# Add checkboxes for "Refine Gantt Grouping"
 st.sidebar.markdown("**Refine Gantt Grouping**")
 group_by_room = st.sidebar.checkbox("Group by Room", value=False)
 group_by_item = st.sidebar.checkbox("Group by Item", value=False)
 group_by_task = st.sidebar.checkbox("Group by Task", value=False)
 
-# Add a radio for color mode: status or progress
 color_mode = st.sidebar.radio("Color Gantt By:", ["Status", "Progress"], index=0)
 
-# Date range
 df_dates = edited_df.dropna(subset=["Start Date", "End Date"])
 if df_dates.empty:
     default_min = datetime.today()
@@ -290,15 +280,12 @@ else:
 
 selected_date_range = st.sidebar.date_input("Select Date Range", [default_min, default_max])
 
-
 #####################
 # 7) Filter the DataFrame
 #####################
 df_filtered = edited_df.copy()
 
-# For each of (Activity, Item, Task, Room), filter if chosen
 if selected_activity_norm:
-    # Lowercase compare
     chosen_lc = [a.lower().strip() for a in selected_activity_norm]
     df_filtered = df_filtered[df_filtered["Activity"].astype(str).str.lower().str.strip().isin(chosen_lc)]
 if selected_item_norm:
@@ -311,16 +298,13 @@ if selected_room_norm:
     chosen_lc = [a.lower().strip() for a in selected_room_norm]
     df_filtered = df_filtered[df_filtered["Room"].astype(str).str.lower().str.strip().isin(chosen_lc)]
 
-# Filter by Status
 if selected_statuses:
     chosen_lc = [a.lower().strip() for a in selected_statuses]
     df_filtered = df_filtered[df_filtered["Status"].str.lower().str.strip().isin(chosen_lc)]
 
-# Show/Hide finished tasks
 if not show_finished:
     df_filtered = df_filtered[df_filtered["Status"].str.lower().str.strip() != "finished"]
 
-# Filter by date range
 if len(selected_date_range) == 2:
     start_filter = pd.to_datetime(selected_date_range[0])
     end_filter = pd.to_datetime(selected_date_range[1])
@@ -330,36 +314,26 @@ if len(selected_date_range) == 2:
             (df_filtered["End Date"] <= end_filter)
         ]
 
-
 #####################
 # 8) Gantt Chart
 #####################
 st.subheader("Gantt Chart")
-
 today = pd.to_datetime("today").normalize()
 
 def compute_display_status(row):
-    """
-    Return a "display status" that includes "Delayed" logic if
-    End Date < today and not finished.
-    """
     raw_status = row["Status"].strip().lower()
     if raw_status == "finished":
         return "Finished"
-    # If end date is behind us, mark Delayed
     if pd.notnull(row["End Date"]) and row["End Date"] < today:
         return "Delayed"
     if raw_status == "in progress":
         return "In Progress"
-    # else default = "Not Started"
     return "Not Started"
-
 
 def create_gantt_chart(df_in: pd.DataFrame):
     if df_in.empty:
         return None
 
-    # Build dynamic grouping
     group_cols = ["Activity"]
     if group_by_room and "Room" in df_in.columns:
         group_cols.append("Room")
@@ -371,50 +345,24 @@ def create_gantt_chart(df_in: pd.DataFrame):
     if not group_cols:
         return None
 
-    # If color by "Status", we use aggregated "delayed/finished/etc." logic
-    # If color by "Progress", we use average progress
-    agg_dict = {
-        "Start Date": "min",
-        "End Date": "max"
-    }
+    agg_dict = {"Start Date": "min", "End Date": "max"}
     if color_mode == "Progress":
         agg_dict["Progress"] = "mean"
 
     grouped = df_in.groupby(group_cols).agg(agg_dict).reset_index()
 
-    # Build a label for the y-axis
     if len(group_cols) == 1:
         grouped["Group Label"] = grouped[group_cols[0]].astype(str)
     else:
         grouped["Group Label"] = grouped[group_cols].astype(str).agg(" | ".join, axis=1)
 
     if color_mode == "Status":
-        # We define "Display Status" per group by checking each row in that group
         def get_group_status(grp_row):
-            # find subset of df_in that matches the group
             cond = True
             for gcol in group_cols:
                 cond = cond & (df_in[gcol] == grp_row[gcol])
             subset = df_in[cond]
-            # If any row is finished => possibly all finished? 
-            # Or we do the logic row by row:
-            # We'll say if ANY row is delayed => "Delayed"
-            # else if ANY row is in progress => "In Progress", etc.
-            # But the user might want a simpler approach:
-            # We can pick the "worst" or "lowest" status?
-            # We'll do a simpler approach: if ANY row is delayed => "Delayed", else if ANY row is in progress => "In Progress", etc.
-
-            statuses = []
-            for _, r in subset.iterrows():
-                ds = compute_display_status(r)
-                statuses.append(ds)
-
-            # Priority: Delayed > In Progress > Not Started > Finished 
-            # Actually let's do a simpler logic:
-            # if "Delayed" in statuses => "Delayed"
-            # else if "In Progress" in statuses => "In Progress"
-            # else if all are "Finished" => "Finished"
-            # else => "Not Started"
+            statuses = [compute_display_status(r) for _, r in subset.iterrows()]
             if "Delayed" in statuses:
                 return "Delayed"
             if "In Progress" in statuses:
@@ -422,9 +370,7 @@ def create_gantt_chart(df_in: pd.DataFrame):
             if all(s == "Finished" for s in statuses):
                 return "Finished"
             return "Not Started"
-
         grouped["Display Status"] = grouped.apply(get_group_status, axis=1)
-
         color_discrete_map = {
             "Not Started": "lightgray",
             "In Progress": "blue",
@@ -441,16 +387,14 @@ def create_gantt_chart(df_in: pd.DataFrame):
             title="Gantt Chart (Color by Status w/ Delayed Logic)"
         )
         fig.update_layout(yaxis_title=" | ".join(group_cols))
-
     else:
-        # color by "Progress" (numeric)
         fig = px.timeline(
             grouped,
             x_start="Start Date",
             x_end="End Date",
             y="Group Label",
             color="Progress",
-            range_color=[0,100],
+            range_color=[0, 100],
             color_continuous_scale="Blues",
             hover_data=["Progress"],
             title="Gantt Chart (Color by Avg Progress)"
@@ -462,13 +406,11 @@ def create_gantt_chart(df_in: pd.DataFrame):
     fig.update_layout(xaxis_title="Timeline")
     return fig
 
-
 gantt_fig = create_gantt_chart(df_filtered)
 if gantt_fig is None:
     st.info("No data available for the Gantt chart (perhaps filters eliminated all rows).")
 else:
     st.plotly_chart(gantt_fig, use_container_width=True)
-
 
 #####################
 # 9) Filtered Data Snapshot + Image Gallery
@@ -482,13 +424,12 @@ if df_images.empty:
     st.info("No images found in the current filtered dataset.")
 else:
     for idx, row in df_images.iterrows():
-        filename = row["Image"]
-        filepath = os.path.join("uploaded_images", filename)
+        img_path = row["Image"]
         st.markdown(f"**Row {idx}:** Activity = {row.get('Activity','(none)')}, Task = {row.get('Task','(none)')}")
-        if os.path.exists(filepath):
-            st.image(filepath, caption=f"File: {filename}", use_column_width=False)
+        if img_path and os.path.exists(img_path):
+            st.image(img_path, caption=f"File: {os.path.basename(img_path)}", use_column_width=False)
         else:
-            st.warning(f"File not found: {filepath}")
+            st.warning(f"File not found: {img_path}")
 
 st.markdown("---")
 st.markdown("**End of the Dashboard**")
