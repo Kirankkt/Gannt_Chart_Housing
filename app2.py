@@ -94,26 +94,34 @@ with st.sidebar.form("add_column_form"):
             except Exception as e:
                 st.sidebar.error(f"Error adding column: {e}")
 
-# Delete Column Form (lists all columns)
+# Define default columns that should never be deleted.
+default_columns = {"Activity", "Item", "Task", "Room", "Location", "Notes", "Start Date", "End Date", "Status", "Workdays"}
+
+# Delete Column Form: only list columns that are NOT in the default set.
 with st.sidebar.form("delete_column_form"):
-    all_columns = list(edited_df.columns)
-    cols_to_delete = st.multiselect("Select Columns to Delete", options=all_columns)
-    delete_submitted = st.form_submit_button("Delete Selected Columns")
-    if delete_submitted:
-        if not cols_to_delete:
-            st.sidebar.warning("Please select at least one column to delete.")
-        else:
-            edited_df.drop(columns=cols_to_delete, inplace=True)
-            try:
-                edited_df.to_excel(DATA_FILE, index=False)
-                st.sidebar.success("Selected columns deleted successfully!")
-                load_data.clear()
-                if hasattr(st, "experimental_rerun"):
-                    st.experimental_rerun()
-                else:
-                    st.sidebar.info("Please refresh the page to see the updated columns.")
-            except Exception as e:
-                st.sidebar.error(f"Error deleting columns: {e}")
+    # Compute additional (newly added) columns only.
+    additional_columns = [col for col in edited_df.columns if col not in default_columns]
+    if additional_columns:
+        cols_to_delete = st.multiselect("Select Newly Added Columns to Delete", options=additional_columns)
+        delete_submitted = st.form_submit_button("Delete Selected Columns")
+        if delete_submitted:
+            if not cols_to_delete:
+                st.sidebar.warning("Please select at least one column to delete.")
+            else:
+                edited_df.drop(columns=cols_to_delete, inplace=True)
+                try:
+                    edited_df.to_excel(DATA_FILE, index=False)
+                    st.sidebar.success("Selected columns deleted successfully!")
+                    load_data.clear()
+                    if hasattr(st, "experimental_rerun"):
+                        st.experimental_rerun()
+                    else:
+                        st.sidebar.info("Please refresh the page to see the updated columns.")
+                except Exception as e:
+                    st.sidebar.error(f"Error deleting columns: {e}")
+    else:
+        st.sidebar.info("No additional columns available for deletion.")
+
 
 # ---------------------------------------------------
 # 3. Sidebar Filters & Options (Reordered: Activity, Item, Task, Room)
