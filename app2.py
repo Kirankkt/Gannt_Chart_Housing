@@ -69,6 +69,7 @@ if st.button("Save Updates"):
 # 2b. Manage Columns: Add and Delete Options
 # ---------------------------------------------------
 st.sidebar.header("Manage Columns")
+# Add New Column Form
 with st.sidebar.form("add_column_form"):
     new_col_name = st.text_input("New Column Name")
     default_val = st.text_input("Default Value", value="")
@@ -91,6 +92,7 @@ with st.sidebar.form("add_column_form"):
             except Exception as e:
                 st.sidebar.error(f"Error adding column: {e}")
 
+# Define default columns that should never be deleted.
 default_columns = {"Activity", "Item", "Task", "Room", "Location", "Notes", "Start Date", "End Date", "Status", "Workdays"}
 with st.sidebar.form("delete_column_form"):
     additional_columns = [col for col in edited_df.columns if col not in default_columns]
@@ -116,7 +118,7 @@ with st.sidebar.form("delete_column_form"):
         st.sidebar.info("No additional columns available for deletion.")
 
 # ---------------------------------------------------
-# 3. Sidebar Filters & Options (Reordered: Activity, Item, Task, Room)
+# 3. Sidebar Filters & Options (Ordered: Activity, Item, Task, Room)
 # ---------------------------------------------------
 st.sidebar.header("Filter Options")
 def norm_unique(col):
@@ -132,13 +134,18 @@ selected_room_norm = st.sidebar.multiselect("Select Room (leave empty for all)",
 status_options = norm_unique("Status")
 selected_statuses = st.sidebar.multiselect("Select Status (leave empty for all)", options=status_options, default=[])
 show_finished = st.sidebar.checkbox("Show Finished Tasks", value=True)
+
 # --- New: Independent refine options ---
 refine_by_task = st.sidebar.checkbox("Refine by Task", value=False)
 refine_by_item = st.sidebar.checkbox("Refine by Item", value=False)
 refine_by_room = st.sidebar.checkbox("Refine by Room", value=False)
+
 min_date = edited_df["Start Date"].min()
 max_date = edited_df["End Date"].max()
 selected_date_range = st.sidebar.date_input("Select Date Range", value=[min_date, max_date])
+
+# Define color_by_status before using it:
+color_by_status = st.sidebar.checkbox("Color-code Gantt Chart by Activity Status", value=True, key="color_by_status")
 
 # ---------------------------------------------------
 # 4. Filtering the DataFrame Based on User Input
@@ -187,9 +194,10 @@ def aggregated_status(group_df):
 
 # ---------------------------------------------------
 # 6. Gantt Chart Generation
-#    Grouping: always group by Activity plus any refine options selected.
+#    Group by Activity plus any additional fields per refine options.
 # ---------------------------------------------------
 def create_gantt_chart(df_filtered, color_by_status=False):
+    # Build grouping list starting with Activity.
     group_cols = ["Activity"]
     if refine_by_room:
         group_cols.append("Room")
@@ -315,12 +323,11 @@ tabs = st.tabs(["Dashboard", "Detailed Summary", "Reports"])
 # ---------- Dashboard Tab ----------
 with tabs[0]:
     st.header("Dashboard Overview")
-    # Instead of a side-by-side layout, display vertically so that filters remain visible
+    # Instead of side-by-side layout, we display vertically so the sidebar remains visible.
     st.subheader("Current Tasks Snapshot")
     st.dataframe(df_filtered)
     st.markdown("---")
     st.subheader("Project Timeline")
-    # Pass configuration to remove the fullscreen toggle
     st.plotly_chart(gantt_fig, use_container_width=True, config={'modeBarButtonsToRemove': ['toggleFullscreen']})
     st.markdown("---")
     st.metric("Overall Completion", f"{completion_percentage:.1f}%")
