@@ -12,7 +12,7 @@ from docx import Document
 st.set_page_config(page_title="Construction Project Manager Dashboard ", layout="wide")
 st.title("Construction Project Manager Dashboard II")
 st.markdown(
-    "This dashboard provides an  overview of the project—including task snapshots, timeline visualization, and detailed reports. Use the sidebar to filter the data."
+    "This dashboard provides an overview of the project—including task snapshots, timeline visualization, and detailed reports. Use the sidebar to filter the data."
 )
 
 # ---------------------------------------------------
@@ -46,7 +46,6 @@ st.markdown(
     **Finished**, **In Progress**, or **Not Started**.
     """
 )
-# Updated dropdown options to include "Not Started"
 column_config = {
     "Status": st.column_config.SelectboxColumn(
         "Status",
@@ -55,7 +54,7 @@ column_config = {
     )
 }
 edited_df = st.data_editor(df, column_config=column_config, use_container_width=True)
-# If the cell is empty or null, default it to "Not Started"
+# Default blank or null values to "Not Started"
 edited_df["Status"] = edited_df["Status"].fillna("Not Started").replace("", "Not Started")
 
 # ---------------------------------------------------
@@ -77,14 +76,21 @@ activities = sorted(edited_df["Activity"].dropna().unique())
 selected_activities = st.sidebar.multiselect("Select Activity (leave empty for all)", options=activities, default=[])
 rooms = sorted(edited_df["Room"].dropna().unique())
 selected_rooms = st.sidebar.multiselect("Select Room (leave empty for all)", options=rooms, default=[])
+# New filters for Item and Task:
+items = sorted(edited_df["Item"].dropna().unique())
+selected_items = st.sidebar.multiselect("Select Item (leave empty for all)", options=items, default=[])
+tasks = sorted(edited_df["Task"].dropna().unique())
+selected_tasks = st.sidebar.multiselect("Select Task (leave empty for all)", options=tasks, default=[])
+
 if edited_df["Status"].notna().sum() > 0:
     statuses = sorted(edited_df["Status"].dropna().unique())
     selected_statuses = st.sidebar.multiselect("Select Status (leave empty for all)", options=statuses, default=[])
 else:
     selected_statuses = []
 show_finished = st.sidebar.checkbox("Show Finished Tasks", value=True)
-# NEW: Toggle for color-coding the aggregated Gantt chart by activity status.
 color_by_status = st.sidebar.checkbox("Color-code Gantt Chart by Activity Status", value=True)
+# New checkbox: refine view by Task and Item
+granular_view = st.sidebar.checkbox("Refine view by Task and Item", value=False)
 min_date = edited_df["Start Date"].min()
 max_date = edited_df["End Date"].max()
 selected_date_range = st.sidebar.date_input("Select Date Range", value=[min_date, max_date])
@@ -97,6 +103,10 @@ if selected_activities:
     df_filtered = df_filtered[df_filtered["Activity"].isin(selected_activities)]
 if selected_rooms:
     df_filtered = df_filtered[df_filtered["Room"].isin(selected_rooms)]
+if selected_items:
+    df_filtered = df_filtered[df_filtered["Item"].isin(selected_items)]
+if selected_tasks:
+    df_filtered = df_filtered[df_filtered["Task"].isin(selected_tasks)]
 if selected_statuses:
     df_filtered = df_filtered[df_filtered["Status"].isin(selected_statuses)]
 if not show_finished:
@@ -111,97 +121,145 @@ if len(selected_date_range) == 2:
 # ---------------------------------------------------
 def aggregated_status(group_df):
     now = pd.Timestamp(datetime.today().date())
-    # Use lower-case stripped values for consistency
     statuses = group_df["Status"].str.strip().str.lower()
-    # If any task is "in progress", then the activity is "In Progress"
     if "in progress" in statuses.values:
         return "In Progress"
-    # If all tasks are "finished", then determine on schedule or late:
     if all(status == "finished" for status in statuses):
         max_end = group_df["End Date"].dt.normalize().max()
         if now <= max_end:
             return "Finished On Time"
         else:
             return "Finished Late"
-    # If all tasks are "not started", then return "Not Started"
     if all(status == "not started" for status in statuses):
         return "Not Started"
-    # If today is before the earliest start date, return "Not Started"
     min_start = group_df["Start Date"].dt.normalize().min()
     if now < min_start:
         return "Not Started"
-    # Otherwise, default to "In Progress"
     return "In Progress"
 
 # ---------------------------------------------------
 # 6. Gantt Chart Generation
 # ---------------------------------------------------
-def create_gantt_chart(df_filtered, color_by_status=False):
+def create_gantt_chart(df_filtered, color_by_status=False, granular_view=False):
     if color_by_status:
-        # Aggregate by Activity only.
-        agg_df = df_filtered.groupby("Activity").agg({
-            "Start Date": "min",
-            "End Date": "max"
-        }).reset_index()
-        # Compute the aggregated status per activity.
-        def compute_activity_status(activity):
-            subset = df_filtered[df_filtered["Activity"] == activity]
-            return aggregated_status(subset)
-        agg_df["Display Status"] = agg_df["Activity"].apply(compute_activity_status)
-        # Define custom color mapping.
-        color_discrete_map = {
-            "Not Started": "lightgray",
-            "In Progress": "blue",
-            "Finished On Time": "green",
-            "Finished Late": "orange"
-        }
-        fig = px.timeline(
-            agg_df,
-            x_start="Start Date",
-            x_end="End Date",
-            y="Activity",
-            color="Display Status",
-            color_discrete_map=color_discrete_map,
-            title="Activity Timeline (Color-coded by Status)"
-        )
-        fig.update_layout(yaxis_title="Activity")
-    else:
-        group_cols = ["Activity", "Room"] if selected_rooms else ["Activity"]
-        agg_df = df_filtered.groupby(group_cols).agg({
-            "Start Date": "min",
-            "End Date": "max",
-            "Task": lambda x: ", ".join(sorted(set(x.dropna()))),
-            "Item": lambda x: ", ".join(sorted(set(x.dropna())))
-        }).reset_index()
-        agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
-        if "Room" in group_cols:
-            agg_df["Activity_Room"] = agg_df["Activity"] + " (" + agg_df["Room"] + ")"
+        if granular_view:
+            # Group by Activity, Room, Item, and Task for a granular view.
+            group_cols = ["Activity", "Room", "Item", "Task"]
+            agg_df = df_filtered.groupby(group_cols).agg({
+                "Start Date": "min",
+                "End Date": "max"
+            }).reset_index()
+            # Compute aggregated status for each group.
+            def compute_group_status(row):
+                cond = (df_filtered["Activity"] == row["Activity"]) & \
+                       (df_filtered["Room"] == row["Room"]) & \
+                       (df_filtered["Item"] == row["Item"]) & \
+                       (df_filtered["Task"] == row["Task"])
+                subset = df_filtered[cond]
+                return aggregated_status(subset)
+            agg_df["Display Status"] = agg_df.apply(compute_group_status, axis=1)
+            # Create a label concatenating the four fields.
+            agg_df["Group Label"] = agg_df["Activity"] + " | " + agg_df["Room"] + " | " + agg_df["Item"] + " | " + agg_df["Task"]
+            color_discrete_map = {
+                "Not Started": "lightgray",
+                "In Progress": "blue",
+                "Finished On Time": "green",
+                "Finished Late": "orange"
+            }
             fig = px.timeline(
                 agg_df,
                 x_start="Start Date",
                 x_end="End Date",
-                y="Activity_Room",
-                color="Activity",
-                hover_data=["Items", "Tasks"],
-                title="Activity & Room Timeline"
+                y="Group Label",
+                color="Display Status",
+                color_discrete_map=color_discrete_map,
+                title="Granular Task Timeline (Color-coded by Status)"
             )
-            fig.update_layout(yaxis_title="Activity (Room)")
+            fig.update_layout(yaxis_title="Activity | Room | Item | Task")
         else:
+            # Default aggregated view by Activity only.
+            agg_df = df_filtered.groupby("Activity").agg({
+                "Start Date": "min",
+                "End Date": "max"
+            }).reset_index()
+            def compute_activity_status(activity):
+                subset = df_filtered[df_filtered["Activity"] == activity]
+                return aggregated_status(subset)
+            agg_df["Display Status"] = agg_df["Activity"].apply(compute_activity_status)
+            color_discrete_map = {
+                "Not Started": "lightgray",
+                "In Progress": "blue",
+                "Finished On Time": "green",
+                "Finished Late": "orange"
+            }
             fig = px.timeline(
                 agg_df,
                 x_start="Start Date",
                 x_end="End Date",
                 y="Activity",
-                color="Activity",
-                hover_data=["Items", "Tasks"],
-                title="Activity Timeline"
+                color="Display Status",
+                color_discrete_map=color_discrete_map,
+                title="Activity Timeline (Color-coded by Status)"
             )
             fig.update_layout(yaxis_title="Activity")
+    else:
+        if granular_view:
+            group_cols = ["Activity", "Room", "Item", "Task"]
+            agg_df = df_filtered.groupby(group_cols).agg({
+                "Start Date": "min",
+                "End Date": "max",
+                "Task": lambda x: ", ".join(sorted(set(x.dropna()))),
+                "Item": lambda x: ", ".join(sorted(set(x.dropna())))
+            }).reset_index()
+            agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
+            agg_df["Group Label"] = agg_df["Activity"] + " | " + agg_df["Room"] + " | " + agg_df["Item"] + " | " + agg_df["Task"]
+            fig = px.timeline(
+                agg_df,
+                x_start="Start Date",
+                x_end="End Date",
+                y="Group Label",
+                color="Activity",
+                hover_data=["Items", "Tasks"],
+                title="Granular Activity Timeline"
+            )
+            fig.update_layout(yaxis_title="Activity | Room | Item | Task")
+        else:
+            group_cols = ["Activity", "Room"] if selected_rooms else ["Activity"]
+            agg_df = df_filtered.groupby(group_cols).agg({
+                "Start Date": "min",
+                "End Date": "max",
+                "Task": lambda x: ", ".join(sorted(set(x.dropna()))),
+                "Item": lambda x: ", ".join(sorted(set(x.dropna())))
+            }).reset_index()
+            agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
+            if "Room" in group_cols:
+                agg_df["Activity_Room"] = agg_df["Activity"] + " (" + agg_df["Room"] + ")"
+                fig = px.timeline(
+                    agg_df,
+                    x_start="Start Date",
+                    x_end="End Date",
+                    y="Activity_Room",
+                    color="Activity",
+                    hover_data=["Items", "Tasks"],
+                    title="Activity & Room Timeline"
+                )
+                fig.update_layout(yaxis_title="Activity (Room)")
+            else:
+                fig = px.timeline(
+                    agg_df,
+                    x_start="Start Date",
+                    x_end="End Date",
+                    y="Activity",
+                    color="Activity",
+                    hover_data=["Items", "Tasks"],
+                    title="Activity Timeline"
+                )
+                fig.update_layout(yaxis_title="Activity")
     fig.update_yaxes(autorange="reversed")
     fig.update_layout(xaxis_title="Timeline")
     return fig
 
-gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status)
+gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status, granular_view=granular_view)
 
 # ---------------------------------------------------
 # 7. Overall Completion & Progress Bar Calculation
@@ -392,69 +450,126 @@ def generate_roofing_estimate_report(form_data):
 # ---------------------------------------------------
 # 10. Gantt Chart Generation (Aggregated by Activity)
 # ---------------------------------------------------
-def create_gantt_chart(df_filtered, color_by_status=False):
+def create_gantt_chart(df_filtered, color_by_status=False, granular_view=False):
     if color_by_status:
-        agg_df = df_filtered.groupby("Activity").agg({
-            "Start Date": "min",
-            "End Date": "max"
-        }).reset_index()
-        def compute_activity_status(activity):
-            subset = df_filtered[df_filtered["Activity"] == activity]
-            return aggregated_status(subset)
-        agg_df["Display Status"] = agg_df["Activity"].apply(compute_activity_status)
-        color_discrete_map = {
-            "Not Started": "lightgray",
-            "In Progress": "blue",
-            "Finished On Time": "green",
-            "Finished Late": "orange"
-        }
-        fig = px.timeline(
-            agg_df,
-            x_start="Start Date",
-            x_end="End Date",
-            y="Activity",
-            color="Display Status",
-            color_discrete_map=color_discrete_map,
-            title="Activity Timeline (Color-coded by Status)"
-        )
-        fig.update_layout(yaxis_title="Activity")
-    else:
-        group_cols = ["Activity", "Room"] if selected_rooms else ["Activity"]
-        agg_df = df_filtered.groupby(group_cols).agg({
-            "Start Date": "min",
-            "End Date": "max",
-            "Task": lambda x: ", ".join(sorted(set(x.dropna()))),
-            "Item": lambda x: ", ".join(sorted(set(x.dropna())))
-        }).reset_index()
-        agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
-        if "Room" in group_cols:
-            agg_df["Activity_Room"] = agg_df["Activity"] + " (" + agg_df["Room"] + ")"
+        if granular_view:
+            # Group by Activity, Room, Item, and Task
+            group_cols = ["Activity", "Room", "Item", "Task"]
+            agg_df = df_filtered.groupby(group_cols).agg({
+                "Start Date": "min",
+                "End Date": "max"
+            }).reset_index()
+            # Compute aggregated status for each group
+            def compute_group_status(row):
+                cond = (df_filtered["Activity"] == row["Activity"]) & \
+                       (df_filtered["Room"] == row["Room"]) & \
+                       (df_filtered["Item"] == row["Item"]) & \
+                       (df_filtered["Task"] == row["Task"])
+                subset = df_filtered[cond]
+                return aggregated_status(subset)
+            agg_df["Display Status"] = agg_df.apply(compute_group_status, axis=1)
+            # Concatenate columns to form a detailed label
+            agg_df["Group Label"] = agg_df["Activity"] + " | " + agg_df["Room"] + " | " + agg_df["Item"] + " | " + agg_df["Task"]
+            color_discrete_map = {
+                "Not Started": "lightgray",
+                "In Progress": "blue",
+                "Finished On Time": "green",
+                "Finished Late": "orange"
+            }
             fig = px.timeline(
                 agg_df,
                 x_start="Start Date",
                 x_end="End Date",
-                y="Activity_Room",
-                color="Activity",
-                hover_data=["Items", "Tasks"],
-                title="Activity & Room Timeline"
+                y="Group Label",
+                color="Display Status",
+                color_discrete_map=color_discrete_map,
+                title="Granular Task Timeline (Color-coded by Status)"
             )
-            fig.update_layout(yaxis_title="Activity (Room)")
+            fig.update_layout(yaxis_title="Activity | Room | Item | Task")
         else:
+            # Aggregate by Activity only (default view)
+            agg_df = df_filtered.groupby("Activity").agg({
+                "Start Date": "min",
+                "End Date": "max"
+            }).reset_index()
+            def compute_activity_status(activity):
+                subset = df_filtered[df_filtered["Activity"] == activity]
+                return aggregated_status(subset)
+            agg_df["Display Status"] = agg_df["Activity"].apply(compute_activity_status)
+            color_discrete_map = {
+                "Not Started": "lightgray",
+                "In Progress": "blue",
+                "Finished On Time": "green",
+                "Finished Late": "orange"
+            }
             fig = px.timeline(
                 agg_df,
                 x_start="Start Date",
                 x_end="End Date",
                 y="Activity",
-                color="Activity",
-                hover_data=["Items", "Tasks"],
-                title="Activity Timeline"
+                color="Display Status",
+                color_discrete_map=color_discrete_map,
+                title="Activity Timeline (Color-coded by Status)"
             )
             fig.update_layout(yaxis_title="Activity")
+    else:
+        if granular_view:
+            group_cols = ["Activity", "Room", "Item", "Task"]
+            agg_df = df_filtered.groupby(group_cols).agg({
+                "Start Date": "min",
+                "End Date": "max",
+                "Task": lambda x: ", ".join(sorted(set(x.dropna()))),
+                "Item": lambda x: ", ".join(sorted(set(x.dropna())))
+            }).reset_index()
+            agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
+            agg_df["Group Label"] = agg_df["Activity"] + " | " + agg_df["Room"] + " | " + agg_df["Item"] + " | " + agg_df["Task"]
+            fig = px.timeline(
+                agg_df,
+                x_start="Start Date",
+                x_end="End Date",
+                y="Group Label",
+                color="Activity",
+                hover_data=["Items", "Tasks"],
+                title="Granular Activity Timeline"
+            )
+            fig.update_layout(yaxis_title="Activity | Room | Item | Task")
+        else:
+            group_cols = ["Activity", "Room"] if selected_rooms else ["Activity"]
+            agg_df = df_filtered.groupby(group_cols).agg({
+                "Start Date": "min",
+                "End Date": "max",
+                "Task": lambda x: ", ".join(sorted(set(x.dropna()))),
+                "Item": lambda x: ", ".join(sorted(set(x.dropna())))
+            }).reset_index()
+            agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
+            if "Room" in group_cols:
+                agg_df["Activity_Room"] = agg_df["Activity"] + " (" + agg_df["Room"] + ")"
+                fig = px.timeline(
+                    agg_df,
+                    x_start="Start Date",
+                    x_end="End Date",
+                    y="Activity_Room",
+                    color="Activity",
+                    hover_data=["Items", "Tasks"],
+                    title="Activity & Room Timeline"
+                )
+                fig.update_layout(yaxis_title="Activity (Room)")
+            else:
+                fig = px.timeline(
+                    agg_df,
+                    x_start="Start Date",
+                    x_end="End Date",
+                    y="Activity",
+                    color="Activity",
+                    hover_data=["Items", "Tasks"],
+                    title="Activity Timeline"
+                )
+                fig.update_layout(yaxis_title="Activity")
     fig.update_yaxes(autorange="reversed")
     fig.update_layout(xaxis_title="Timeline")
     return fig
 
-gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status)
+gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status, granular_view=granular_view)
 
 # ---------------------------------------------------
 # 11. Overall Completion & Progress Bar Calculation
