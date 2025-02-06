@@ -24,11 +24,9 @@ def load_data(file_path):
         st.error(f"File {file_path} not found!")
         st.stop()
     df = pd.read_excel(file_path)
-    # Clean column names and convert date columns
     df.columns = df.columns.str.strip()
     df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce")
     df["End Date"] = pd.to_datetime(df["End Date"], errors="coerce")
-    # Ensure Status is a string
     df["Status"] = df["Status"].astype(str)
     return df
 
@@ -63,7 +61,7 @@ if st.button("Save Updates"):
     try:
         edited_df.to_excel(DATA_FILE, index=False)
         st.success("Data successfully saved!")
-        load_data.clear()  # Clear cache so next load uses updated data
+        load_data.clear()
     except Exception as e:
         st.error(f"Error saving data: {e}")
 
@@ -71,7 +69,6 @@ if st.button("Save Updates"):
 # 2b. Manage Columns: Add and Delete Options
 # ---------------------------------------------------
 st.sidebar.header("Manage Columns")
-# Add New Column Form
 with st.sidebar.form("add_column_form"):
     new_col_name = st.text_input("New Column Name")
     default_val = st.text_input("Default Value", value="")
@@ -94,7 +91,6 @@ with st.sidebar.form("add_column_form"):
             except Exception as e:
                 st.sidebar.error(f"Error adding column: {e}")
 
-# Delete Column Form – only allow deletion of additional (non-default) columns
 default_columns = {"Activity", "Item", "Task", "Room", "Location", "Notes", "Start Date", "End Date", "Status", "Workdays"}
 with st.sidebar.form("delete_column_form"):
     additional_columns = [col for col in edited_df.columns if col not in default_columns]
@@ -120,15 +116,11 @@ with st.sidebar.form("delete_column_form"):
         st.sidebar.info("No additional columns available for deletion.")
 
 # ---------------------------------------------------
-# 3. Sidebar Filters & Options
-#    Order: Activity, Item, Task, Room
-#    Also add independent refine options.
+# 3. Sidebar Filters & Options (Ordered: Activity, Item, Task, Room)
 # ---------------------------------------------------
 st.sidebar.header("Filter Options")
-
 def norm_unique(col):
     return sorted(set(edited_df[col].dropna().astype(str).str.lower().str.strip()))
-
 activity_options = norm_unique("Activity")
 selected_activity_norm = st.sidebar.multiselect("Select Activity (leave empty for all)", options=activity_options, default=[], key="selected_activity_norm")
 item_options = norm_unique("Item")
@@ -140,10 +132,12 @@ selected_room_norm = st.sidebar.multiselect("Select Room (leave empty for all)",
 status_options = norm_unique("Status")
 selected_statuses = st.sidebar.multiselect("Select Status (leave empty for all)", options=status_options, default=[], key="selected_statuses")
 show_finished = st.sidebar.checkbox("Show Finished Tasks", value=True)
-# Independent refine options:
+# Independent refine options
 refine_by_task = st.sidebar.checkbox("Refine by Task", value=False)
 refine_by_item = st.sidebar.checkbox("Refine by Item", value=False)
 refine_by_room = st.sidebar.checkbox("Refine by Room", value=False)
+# Compute granular_view as True if any refine option is selected
+granular_view = refine_by_task or refine_by_item or refine_by_room
 min_date = edited_df["Start Date"].min()
 max_date = edited_df["End Date"].max()
 selected_date_range = st.sidebar.date_input("Select Date Range", value=[min_date, max_date], key="selected_date_range")
@@ -157,14 +151,15 @@ if st.sidebar.button("Clear Filters"):
     if hasattr(st, "experimental_rerun"):
         st.experimental_rerun()
 
+# IMPORTANT: Define color_by_status so that it is available in the global scope.
+color_by_status = st.sidebar.checkbox("Color-code Gantt Chart by Activity Status", value=True, key="color_by_status")
+
 # ---------------------------------------------------
 # 4. Filtering the DataFrame Based on User Input
 # ---------------------------------------------------
 df_filtered = edited_df.copy()
-# Create normalized helper columns for filtering; fill missing values with empty strings
 for col in ["Activity", "Item", "Task", "Room", "Status"]:
     df_filtered[col + "_norm"] = df_filtered[col].fillna("").astype(str).str.lower().str.strip()
-
 if selected_activity_norm:
     df_filtered = df_filtered[df_filtered["Activity_norm"].isin(selected_activity_norm)]
 if selected_item_norm:
@@ -184,7 +179,7 @@ if len(selected_date_range) == 2:
 df_filtered.drop(columns=[c for c in df_filtered.columns if c.endswith("_norm")], inplace=True)
 
 # ---------------------------------------------------
-# 5. Helper Function: Compute Aggregated Status for an Activity
+# 5. Helper Function: Compute Aggregated Status for a Group
 # ---------------------------------------------------
 def aggregated_status(group_df):
     now = pd.Timestamp(datetime.today().date())
@@ -206,11 +201,9 @@ def aggregated_status(group_df):
 
 # ---------------------------------------------------
 # 6. Gantt Chart Generation
-#    Grouping columns: Always group by Activity plus any additional ones 
-#    based on independent refine options.
+#    Group by Activity plus any additional fields per refine options.
 # ---------------------------------------------------
 def create_gantt_chart(df_filtered, color_by_status=False):
-    # Build grouping list: always include Activity.
     group_cols = ["Activity"]
     if refine_by_room:
         group_cols.append("Room")
@@ -218,35 +211,23 @@ def create_gantt_chart(df_filtered, color_by_status=False):
         group_cols.append("Item")
     if refine_by_task:
         group_cols.append("Task")
-    
-    # If no additional grouping is chosen, we use the simpler aggregation by Activity.
+        
     if color_by_status:
-        # Color-coded aggregation
         agg_df = df_filtered.groupby(group_cols).agg({
             "Start Date": "min",
             "End Date": "max"
         }).reset_index()
-        # Compute aggregated status for each group
-        if "Task" in group_cols or "Item" in group_cols or "Room" in group_cols:
-            # For granular groups, apply row-wise
-            def compute_group_status(row):
-                cond = True
-                for col in group_cols:
-                    cond &= (df_filtered[col] == row[col])
-                subset = df_filtered[cond]
-                return aggregated_status(subset)
-            agg_df["Display Status"] = agg_df.apply(compute_group_status, axis=1)
-            # Create a group label showing all grouping fields
-            agg_df["Group Label"] = agg_df[group_cols].apply(lambda x: " | ".join(x.astype(str)), axis=1)
-            y_axis_label = " | ".join(group_cols)
-        else:
-            # Grouping by Activity only
-            def compute_activity_status(activity):
-                subset = df_filtered[df_filtered["Activity"] == activity]
-                return aggregated_status(subset)
-            agg_df["Display Status"] = agg_df["Activity"].apply(compute_activity_status)
-            agg_df["Group Label"] = agg_df["Activity"]
-            y_axis_label = "Activity"
+        # Compute status per group
+        def compute_group_status(row):
+            cond = True
+            for col in group_cols:
+                cond &= (df_filtered[col] == row[col])
+            subset = df_filtered[cond]
+            return aggregated_status(subset)
+        agg_df["Display Status"] = agg_df.apply(compute_group_status, axis=1)
+        # Build group label from group_cols
+        agg_df["Group Label"] = agg_df[group_cols].apply(lambda x: " | ".join(x.astype(str)), axis=1)
+        y_axis_label = " | ".join(group_cols)
         color_discrete_map = {
             "Not Started": "lightgray",
             "In Progress": "blue",
@@ -264,7 +245,6 @@ def create_gantt_chart(df_filtered, color_by_status=False):
         )
         fig.update_layout(yaxis_title=y_axis_label)
     else:
-        # Without color coding, simply group and color by Activity.
         agg_df = df_filtered.groupby(group_cols).agg({
             "Start Date": "min",
             "End Date": "max",
@@ -288,10 +268,9 @@ def create_gantt_chart(df_filtered, color_by_status=False):
             title="Gantt Chart"
         )
         fig.update_layout(yaxis_title=y_axis_label)
-    # Remove fullscreen toggle so that when the chart is maximized the sidebar remains visible
-    fig.update_layout(xaxis_title="Timeline", template="plotly_white")
     fig.update_yaxes(autorange="reversed")
-    fig.update_layout(config={'modeBarButtonsToRemove': ['toggleFullscreen']})
+    # Remove the fullscreen toggle so sidebar remains visible even when maximized.
+    fig.update_layout(config={'modeBarButtonsToRemove': ['toggleFullscreen']}, xaxis_title="Timeline", template="plotly_white")
     return fig
 
 gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status)
@@ -324,8 +303,7 @@ status_summary = status_summary.sort_values("Order").drop("Order", axis=1)
 # 9. Additional Dashboard Features
 # ---------------------------------------------------
 today = pd.Timestamp(datetime.today().date())
-overdue_df = df_filtered[(df_filtered["End Date"] < today) &
-                         (df_filtered["Status"].str.strip().str.lower() != "finished")]
+overdue_df = df_filtered[(df_filtered["End Date"] < today) & (df_filtered["Status"].str.strip().str.lower() != "finished")]
 overdue_count = overdue_df.shape[0]
 task_distribution = df_filtered.groupby("Activity").size().reset_index(name="Task Count")
 dist_fig = px.bar(task_distribution, x="Activity", y="Task Count", title="Task Distribution by Activity")
@@ -403,7 +381,6 @@ with tabs[1]:
 # ---------- Reports Tab ----------
 with tabs[2]:
     st.header("Reports")
-    # Construction Daily Report Section
     st.markdown("### Construction Daily Report")
     def generate_daily_report(df):
         document = Document()
@@ -500,7 +477,7 @@ with tabs[2]:
     
     st.markdown("---")
     
-    # Additional Templates Section (remaining template sections remain unchanged)
+    # Additional Templates Section (other templates remain unchanged)
     st.markdown("### Export Filtered Data")
     def convert_df_to_csv(df):
         return df.to_csv(index=False).encode("utf-8")
