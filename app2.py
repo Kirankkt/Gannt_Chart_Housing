@@ -28,7 +28,7 @@ def load_data(file_path):
     df.columns = df.columns.str.strip()
     df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce")
     df["End Date"] = pd.to_datetime(df["End Date"], errors="coerce")
-    # Ensure Status is a string and fill missing with empty string
+    # Ensure Status is a string
     df["Status"] = df["Status"].astype(str)
     return df
 
@@ -94,8 +94,7 @@ with st.sidebar.form("add_column_form"):
             except Exception as e:
                 st.sidebar.error(f"Error adding column: {e}")
 
-# Delete Column Form – restrict deletion to newly added columns only
-# (i.e. columns not in the default set)
+# Delete Column Form – allow deletion only for non‑default columns
 default_columns = {"Activity", "Item", "Task", "Room", "Location", "Notes", "Start Date", "End Date", "Status", "Workdays"}
 with st.sidebar.form("delete_column_form"):
     additional_columns = [col for col in edited_df.columns if col not in default_columns]
@@ -124,10 +123,9 @@ with st.sidebar.form("delete_column_form"):
 # 3. Sidebar Filters & Options (Ordered: Activity, Item, Task, Room)
 # ---------------------------------------------------
 st.sidebar.header("Filter Options")
-# Assign explicit keys so we can clear them later
+# Use explicit keys so filters can be cleared
 def norm_unique(col):
     return sorted(set(edited_df[col].dropna().astype(str).str.lower().str.strip()))
-
 activity_options = norm_unique("Activity")
 selected_activity_norm = st.sidebar.multiselect("Select Activity (leave empty for all)", options=activity_options, default=[], key="selected_activity_norm")
 item_options = norm_unique("Item")
@@ -140,7 +138,8 @@ status_options = norm_unique("Status")
 selected_statuses = st.sidebar.multiselect("Select Status (leave empty for all)", options=status_options, default=[], key="selected_statuses")
 show_finished = st.sidebar.checkbox("Show Finished Tasks", value=True)
 color_by_status = st.sidebar.checkbox("Color-code Gantt Chart by Activity Status", value=True)
-granular_view = st.sidebar.checkbox("Refine view by Task and Item", value=False)
+# Updated label to indicate that refinement applies to Task, Item, and Room
+granular_view = st.sidebar.checkbox("Refine view by Task, Item, and Room", value=False)
 min_date = edited_df["Start Date"].min()
 max_date = edited_df["End Date"].max()
 selected_date_range = st.sidebar.date_input("Select Date Range", value=[min_date, max_date], key="selected_date_range")
@@ -160,7 +159,6 @@ if st.sidebar.button("Clear Filters"):
 # 4. Filtering the DataFrame Based on User Input
 # ---------------------------------------------------
 df_filtered = edited_df.copy()
-# Create normalized helper columns for filtering; fill NaN with empty strings
 for col in ["Activity", "Item", "Task", "Room", "Status"]:
     df_filtered[col + "_norm"] = df_filtered[col].fillna("").astype(str).str.lower().str.strip()
 if selected_activity_norm:
@@ -221,7 +219,7 @@ def create_gantt_chart(df_filtered, color_by_status=False, granular_view=False):
                 subset = df_filtered[cond]
                 return aggregated_status(subset)
             agg_df["Display Status"] = agg_df.apply(compute_group_status, axis=1)
-            # For missing values, fill with empty string when building the label
+            # Fill missing values with empty string for label
             for col in ["Activity", "Room", "Item", "Task"]:
                 agg_df[col] = agg_df[col].fillna("")
             agg_df["Group Label"] = agg_df["Activity"] + " | " + agg_df["Room"] + " | " + agg_df["Item"] + " | " + agg_df["Task"]
@@ -287,6 +285,7 @@ def create_gantt_chart(df_filtered, color_by_status=False, granular_view=False):
             )
             fig.update_layout(yaxis_title="Activity | Room | Item | Task")
         else:
+            # When not refining, if there is any room filter then group by Activity and Room, else by Activity only
             group_cols = ["Activity", "Room"] if selected_room_norm else ["Activity"]
             agg_df = df_filtered.groupby(group_cols).agg({
                 "Start Date": "min",
@@ -318,9 +317,9 @@ def create_gantt_chart(df_filtered, color_by_status=False, granular_view=False):
                     title="Activity Timeline"
                 )
                 fig.update_layout(yaxis_title="Activity")
-    # Remove fullscreen button from the mode bar so the sidebar remains visible
-    fig.update_layout(xaxis_title="Timeline", template="plotly_white")
     fig.update_yaxes(autorange="reversed")
+    # Remove fullscreen toggle so sidebar remains visible
+    fig.update_layout(xaxis_title="Timeline", template="plotly_white")
     return fig
 
 gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status, granular_view=granular_view)
@@ -570,7 +569,7 @@ with tabs[2]:
                 file_name="Work_Order_Document.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             )
-    # ... (the rest of your template sections remain unchanged) ...
+    # ... (Other template sections remain unchanged) ...
     
     st.markdown("---")
     st.markdown("### Export Filtered Data")
