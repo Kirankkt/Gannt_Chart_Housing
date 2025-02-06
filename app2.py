@@ -54,7 +54,6 @@ column_config = {
     )
 }
 edited_df = st.data_editor(df, column_config=column_config, use_container_width=True)
-# If the cell is empty or null, default it to "Not Started"
 edited_df["Status"] = edited_df["Status"].fillna("Not Started").replace("", "Not Started")
 
 # ---------------------------------------------------
@@ -90,8 +89,6 @@ with st.sidebar.form("add_column_form"):
                 load_data.clear()
             except Exception as e:
                 st.sidebar.error(f"Error adding column: {e}")
-
-# Allow deletion only for columns that are not default
 additional_columns = [col for col in edited_df.columns if col not in default_columns]
 if additional_columns:
     with st.sidebar.form("delete_column_form"):
@@ -113,7 +110,6 @@ if additional_columns:
 # 3. Sidebar Filters & Options (Reordered: Activity, Item, Task, Room)
 # ---------------------------------------------------
 st.sidebar.header("Filter Options")
-# For robust filtering, compute normalized values
 def norm_unique(col):
     return sorted(set(edited_df[col].dropna().astype(str).str.lower().str.strip()))
 activity_options = norm_unique("Activity")
@@ -124,8 +120,6 @@ task_options = norm_unique("Task")
 selected_task_norm = st.sidebar.multiselect("Select Task (leave empty for all)", options=task_options, default=[])
 room_options = norm_unique("Room")
 selected_room_norm = st.sidebar.multiselect("Select Room (leave empty for all)", options=room_options, default=[])
-
-# For Status, we assume values are already normalized by our default setting
 status_options = norm_unique("Status")
 selected_statuses = st.sidebar.multiselect("Select Status (leave empty for all)", options=status_options, default=[])
 show_finished = st.sidebar.checkbox("Show Finished Tasks", value=True)
@@ -142,7 +136,6 @@ df_filtered = edited_df.copy()
 # Create normalized columns for filtering
 for col in ["Activity", "Item", "Task", "Room", "Status"]:
     df_filtered[col + "_norm"] = df_filtered[col].astype(str).str.lower().str.strip()
-
 if selected_activity_norm:
     df_filtered = df_filtered[df_filtered["Activity_norm"].isin(selected_activity_norm)]
 if selected_item_norm:
@@ -159,7 +152,6 @@ if len(selected_date_range) == 2:
     start_range = pd.to_datetime(selected_date_range[0])
     end_range = pd.to_datetime(selected_date_range[1])
     df_filtered = df_filtered[(df_filtered["Start Date"] >= start_range) & (df_filtered["End Date"] <= end_range)]
-# Drop the normalized helper columns now
 df_filtered.drop(columns=[c for c in df_filtered.columns if c.endswith("_norm")], inplace=True)
 
 # ---------------------------------------------------
@@ -189,7 +181,6 @@ def aggregated_status(group_df):
 def create_gantt_chart(df_filtered, color_by_status=False, granular_view=False):
     if color_by_status:
         if granular_view:
-            # Group by Activity, Room, Item, and Task
             group_cols = ["Activity", "Room", "Item", "Task"]
             agg_df = df_filtered.groupby(group_cols).agg({
                 "Start Date": "min",
@@ -221,7 +212,6 @@ def create_gantt_chart(df_filtered, color_by_status=False, granular_view=False):
             )
             fig.update_layout(yaxis_title="Activity | Room | Item | Task")
         else:
-            # Aggregate by Activity only.
             agg_df = df_filtered.groupby("Activity").agg({
                 "Start Date": "min",
                 "End Date": "max"
@@ -248,7 +238,6 @@ def create_gantt_chart(df_filtered, color_by_status=False, granular_view=False):
             fig.update_layout(yaxis_title="Activity")
     else:
         if granular_view:
-            # Group by all four fields for granular view without color coding
             group_cols = ["Activity", "Room", "Item", "Task"]
             agg_df = df_filtered.groupby(group_cols)[["Start Date", "End Date"]].agg({
                 "Start Date": "min",
@@ -266,7 +255,7 @@ def create_gantt_chart(df_filtered, color_by_status=False, granular_view=False):
             )
             fig.update_layout(yaxis_title="Activity | Room | Item | Task")
         else:
-            group_cols = ["Activity", "Room"] if selected_rooms else ["Activity"]
+            group_cols = ["Activity", "Room"] if selected_room_norm else ["Activity"]
             agg_df = df_filtered.groupby(group_cols).agg({
                 "Start Date": "min",
                 "End Date": "max",
@@ -340,15 +329,14 @@ upcoming_start = today
 upcoming_end = today + pd.Timedelta(days=7)
 upcoming_df = df_filtered[(df_filtered["Start Date"] >= upcoming_start) & (df_filtered["Start Date"] <= upcoming_end)]
 filter_summary = []
-if selected_activities:
-    filter_summary.append("Activities: " + ", ".join(selected_activities))
+if selected_activity_norm:
+    filter_summary.append("Activities: " + ", ".join([s.title() for s in selected_activity_norm]))
 if selected_item_norm:
-    # Display capitalized versions for clarity
     filter_summary.append("Items: " + ", ".join([s.title() for s in selected_item_norm]))
 if selected_task_norm:
     filter_summary.append("Tasks: " + ", ".join([s.title() for s in selected_task_norm]))
-if selected_rooms:
-    filter_summary.append("Rooms: " + ", ".join(selected_rooms))
+if selected_room_norm:
+    filter_summary.append("Rooms: " + ", ".join([s.title() for s in selected_room_norm]))
 if selected_statuses:
     filter_summary.append("Status: " + ", ".join(selected_statuses))
 if selected_date_range:
@@ -574,7 +562,7 @@ def create_gantt_chart(df_filtered, color_by_status=False, granular_view=False):
             )
             fig.update_layout(yaxis_title="Activity | Room | Item | Task")
         else:
-            group_cols = ["Activity", "Room"] if selected_rooms else ["Activity"]
+            group_cols = ["Activity", "Room"] if selected_room_norm else ["Activity"]
             agg_df = df_filtered.groupby(group_cols).agg({
                 "Start Date": "min",
                 "End Date": "max",
@@ -612,14 +600,14 @@ def create_gantt_chart(df_filtered, color_by_status=False, granular_view=False):
 gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status, granular_view=granular_view)
 
 # ---------------------------------------------------
-# 11. Overall Completion & Progress Bar Calculation
+# 7. Overall Completion & Progress Bar Calculation
 # ---------------------------------------------------
 total_tasks = edited_df.shape[0]
 finished_tasks = edited_df[edited_df["Status"].str.strip().str.lower() == "finished"].shape[0]
 completion_percentage = (finished_tasks / total_tasks) * 100 if total_tasks > 0 else 0
 
 # ---------------------------------------------------
-# 12. Detailed Status Summary (for Detailed Summary Tab)
+# 8. Detailed Status Summary (for Detailed Summary Tab)
 # ---------------------------------------------------
 def get_status_category(status):
     s = status.strip().lower()
@@ -636,7 +624,7 @@ status_summary["Order"] = status_summary["Status Category"].apply(lambda x: desi
 status_summary = status_summary.sort_values("Order").drop("Order", axis=1)
 
 # ---------------------------------------------------
-# 13. Additional Dashboard Features
+# 9. Additional Dashboard Features
 # ---------------------------------------------------
 today = pd.Timestamp(datetime.today().date())
 overdue_df = df_filtered[(df_filtered["End Date"] < today) &
@@ -648,14 +636,14 @@ upcoming_start = today
 upcoming_end = today + pd.Timedelta(days=7)
 upcoming_df = df_filtered[(df_filtered["Start Date"] >= upcoming_start) & (df_filtered["Start Date"] <= upcoming_end)]
 filter_summary = []
-if selected_activities:
-    filter_summary.append("Activities: " + ", ".join(selected_activities))
+if selected_activity_norm:
+    filter_summary.append("Activities: " + ", ".join([s.title() for s in selected_activity_norm]))
 if selected_item_norm:
     filter_summary.append("Items: " + ", ".join([s.title() for s in selected_item_norm]))
 if selected_task_norm:
     filter_summary.append("Tasks: " + ", ".join([s.title() for s in selected_task_norm]))
-if selected_rooms:
-    filter_summary.append("Rooms: " + ", ".join(selected_rooms))
+if selected_room_norm:
+    filter_summary.append("Rooms: " + ", ".join([s.title() for s in selected_room_norm]))
 if selected_statuses:
     filter_summary.append("Status: " + ", ".join(selected_statuses))
 if selected_date_range:
@@ -666,7 +654,7 @@ not_declared = edited_df[~edited_df["Status"].str.strip().str.lower().isin(["fin
 notes_df = df_filtered[df_filtered["Notes"].notna() & (df_filtered["Notes"].str.strip() != "")]
 
 # ---------------------------------------------------
-# 14. Layout with Tabs: Dashboard, Detailed Summary, Reports
+# 10. Layout with Tabs: Dashboard, Detailed Summary, Reports
 # ---------------------------------------------------
 tabs = st.tabs(["Dashboard", "Detailed Summary", "Reports"])
 
