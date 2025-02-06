@@ -69,6 +69,7 @@ if st.button("Save Updates"):
 # 2b. Manage Columns: Add and Delete Options
 # ---------------------------------------------------
 st.sidebar.header("Manage Columns")
+# Add New Column Form
 with st.sidebar.form("add_column_form"):
     new_col_name = st.text_input("New Column Name")
     default_val = st.text_input("Default Value", value="")
@@ -91,6 +92,7 @@ with st.sidebar.form("add_column_form"):
             except Exception as e:
                 st.sidebar.error(f"Error adding column: {e}")
 
+# Delete Column Form – restrict deletion to non-default columns
 default_columns = {"Activity", "Item", "Task", "Room", "Location", "Notes", "Start Date", "End Date", "Status", "Workdays"}
 with st.sidebar.form("delete_column_form"):
     additional_columns = [col for col in edited_df.columns if col not in default_columns]
@@ -132,12 +134,11 @@ selected_room_norm = st.sidebar.multiselect("Select Room (leave empty for all)",
 status_options = norm_unique("Status")
 selected_statuses = st.sidebar.multiselect("Select Status (leave empty for all)", options=status_options, default=[], key="selected_statuses")
 show_finished = st.sidebar.checkbox("Show Finished Tasks", value=True)
-# Independent refine options
+# Independent refine options: let the user choose to refine by any of Task, Item, and Room.
 refine_by_task = st.sidebar.checkbox("Refine by Task", value=False)
 refine_by_item = st.sidebar.checkbox("Refine by Item", value=False)
 refine_by_room = st.sidebar.checkbox("Refine by Room", value=False)
-# Compute granular_view as True if any refine option is selected
-granular_view = refine_by_task or refine_by_item or refine_by_room
+# For date filtering
 min_date = edited_df["Start Date"].min()
 max_date = edited_df["End Date"].max()
 selected_date_range = st.sidebar.date_input("Select Date Range", value=[min_date, max_date], key="selected_date_range")
@@ -151,7 +152,7 @@ if st.sidebar.button("Clear Filters"):
     if hasattr(st, "experimental_rerun"):
         st.experimental_rerun()
 
-# IMPORTANT: Define color_by_status so that it is available in the global scope.
+# Also define color_by_status (make sure it is defined before use)
 color_by_status = st.sidebar.checkbox("Color-code Gantt Chart by Activity Status", value=True, key="color_by_status")
 
 # ---------------------------------------------------
@@ -211,13 +212,12 @@ def create_gantt_chart(df_filtered, color_by_status=False):
         group_cols.append("Item")
     if refine_by_task:
         group_cols.append("Task")
-        
+    
     if color_by_status:
         agg_df = df_filtered.groupby(group_cols).agg({
             "Start Date": "min",
             "End Date": "max"
         }).reset_index()
-        # Compute status per group
         def compute_group_status(row):
             cond = True
             for col in group_cols:
@@ -225,7 +225,6 @@ def create_gantt_chart(df_filtered, color_by_status=False):
             subset = df_filtered[cond]
             return aggregated_status(subset)
         agg_df["Display Status"] = agg_df.apply(compute_group_status, axis=1)
-        # Build group label from group_cols
         agg_df["Group Label"] = agg_df[group_cols].apply(lambda x: " | ".join(x.astype(str)), axis=1)
         y_axis_label = " | ".join(group_cols)
         color_discrete_map = {
@@ -252,12 +251,8 @@ def create_gantt_chart(df_filtered, color_by_status=False):
             "Item": lambda x: ", ".join(sorted(set(x.dropna())))
         }).reset_index()
         agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
-        if "Room" in group_cols and len(group_cols) == 2:
-            agg_df["Group Label"] = agg_df["Activity"] + " (" + agg_df["Room"] + ")"
-            y_axis_label = "Activity (Room)"
-        else:
-            agg_df["Group Label"] = agg_df[group_cols].apply(lambda x: " | ".join(x.astype(str)), axis=1)
-            y_axis_label = " | ".join(group_cols)
+        agg_df["Group Label"] = agg_df[group_cols].apply(lambda x: " | ".join(x.astype(str)), axis=1)
+        y_axis_label = " | ".join(group_cols)
         fig = px.timeline(
             agg_df,
             x_start="Start Date",
@@ -269,8 +264,9 @@ def create_gantt_chart(df_filtered, color_by_status=False):
         )
         fig.update_layout(yaxis_title=y_axis_label)
     fig.update_yaxes(autorange="reversed")
-    # Remove the fullscreen toggle so sidebar remains visible even when maximized.
-    fig.update_layout(config={'modeBarButtonsToRemove': ['toggleFullscreen']}, xaxis_title="Timeline", template="plotly_white")
+    # Remove fullscreen toggle by not setting config in layout;
+    # instead, pass the config in st.plotly_chart.
+    fig.update_layout(xaxis_title="Timeline", template="plotly_white")
     return fig
 
 gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status)
@@ -303,7 +299,8 @@ status_summary = status_summary.sort_values("Order").drop("Order", axis=1)
 # 9. Additional Dashboard Features
 # ---------------------------------------------------
 today = pd.Timestamp(datetime.today().date())
-overdue_df = df_filtered[(df_filtered["End Date"] < today) & (df_filtered["Status"].str.strip().str.lower() != "finished")]
+overdue_df = df_filtered[(df_filtered["End Date"] < today) &
+                         (df_filtered["Status"].str.strip().str.lower() != "finished")]
 overdue_count = overdue_df.shape[0]
 task_distribution = df_filtered.groupby("Activity").size().reset_index(name="Task Count")
 dist_fig = px.bar(task_distribution, x="Activity", y="Task Count", title="Task Distribution by Activity")
@@ -369,7 +366,7 @@ with tabs[0]:
     else:
         st.info("No additional comments or notes.")
     st.markdown("Use the filters on the sidebar to adjust the view.")
-    
+
 # ---------- Detailed Summary Tab ----------
 with tabs[1]:
     st.header("Detailed Summary")
@@ -377,7 +374,7 @@ with tabs[1]:
     st.dataframe(status_summary, use_container_width=True)
     st.markdown("### Full Detailed Data")
     st.dataframe(df_filtered)
-    
+
 # ---------- Reports Tab ----------
 with tabs[2]:
     st.header("Reports")
@@ -477,7 +474,7 @@ with tabs[2]:
     
     st.markdown("---")
     
-    # Additional Templates Section (other templates remain unchanged)
+    # Additional Templates Section (other template sections omitted for brevity)
     st.markdown("### Export Filtered Data")
     def convert_df_to_csv(df):
         return df.to_csv(index=False).encode("utf-8")
