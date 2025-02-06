@@ -10,6 +10,7 @@ from datetime import datetime
 #################################
 
 DB_FILE = "construction_tasks.db"
+EXCEL_FILE = "construction_timeline.xlsx"  # Existing Excel file to import, if present
 
 def get_connection():
     """Returns a SQLite connection."""
@@ -116,8 +117,50 @@ def fetch_tasks():
         df["end_date"] = pd.to_datetime(df["end_date"], errors="coerce")
     return df
 
+def import_excel_to_db():
+    """Imports data from an Excel file into the SQLite database if the Excel file exists."""
+    if os.path.exists(EXCEL_FILE):
+        df = pd.read_excel(EXCEL_FILE)
+        # Clean column names and convert date columns as needed
+        df.columns = df.columns.str.strip()
+        for col in ["Start Date", "End Date"]:
+            if col in df.columns:
+                df[col] = pd.to_datetime(df[col], errors="coerce")
+        needed_str_cols = ["Status", "Order Status", "Delivery Status"]
+        for c in needed_str_cols:
+            if c not in df.columns:
+                df[c] = ""
+            else:
+                df[c] = df[c].astype(str)
+        if "Progress" not in df.columns:
+            df["Progress"] = 0
+        if "Image" not in df.columns:
+            df["Image"] = ""
+        
+        # Insert each row into the database
+        for index, row in df.iterrows():
+            task_data = {
+                "activity": row.get("Activity", ""),
+                "item": row.get("Item", ""),
+                "task": row.get("Task", ""),
+                "room": row.get("Room", ""),
+                "status": row.get("Status", ""),
+                "order_status": row.get("Order Status", ""),
+                "delivery_status": row.get("Delivery Status", ""),
+                "progress": int(row.get("Progress", 0)),
+                "start_date": row.get("Start Date", datetime.today()),
+                "end_date": row.get("End Date", datetime.today()),
+                "notes": row.get("Notes", ""),
+                "image_path": row.get("Image", "")
+            }
+            insert_task(task_data)
+
 # Initialize the database (runs once when the app starts)
 init_db()
+
+# Import Excel data if the database is empty and the Excel file exists
+if fetch_tasks().empty and os.path.exists(EXCEL_FILE):
+    import_excel_to_db()
 
 #################################
 # Helper: Safe rerun
@@ -151,18 +194,18 @@ Features include:
 #################################
 st.subheader("Data Editor: Existing Tasks")
 df_tasks = fetch_tasks()
+st.write("DEBUG: Data from database", df_tasks)  # For troubleshooting
 
 if df_tasks.empty:
-    st.info("No tasks found in the database.")
+    st.info("No tasks found in the database. If you have an Excel file, ensure it is named 'construction_timeline.xlsx'.")
 else:
-    # Use st.data_editor to allow in-place editing of tasks
+    # Allow in-place editing of tasks
     edited_df = st.data_editor(
         df_tasks,
         use_container_width=True,
         key="data_editor"
     )
     if st.button("Save Changes (Data Editor)"):
-        # Loop through the edited DataFrame and update each row in the database
         for idx, row in edited_df.iterrows():
             update_task_row(row)
         st.success("Changes saved successfully!")
@@ -229,7 +272,6 @@ df_tasks = fetch_tasks()
 if df_tasks.empty:
     st.info("No tasks available to update images.")
 else:
-    # Create a list of task options for selection (e.g., "ID 3: Activity - Task")
     task_options = df_tasks[['id', 'activity', 'task']].apply(
         lambda row: f"ID {row['id']}: {row['activity']} - {row['task']}", axis=1
     ).tolist()
@@ -258,7 +300,6 @@ st.sidebar.header("Filter Options")
 def norm_unique(df, col_name: str):
     return sorted(set(df[col_name].dropna().astype(str).str.strip()))
 
-# Use the latest tasks data for filters
 df_filter = fetch_tasks()
 activity_opts = norm_unique(df_filter, "activity")
 selected_activity = st.sidebar.multiselect("Select Activity", activity_opts, default=[])
@@ -277,16 +318,13 @@ selected_statuses = st.sidebar.multiselect("Select Status", status_opts, default
 
 show_finished = st.sidebar.checkbox("Show Finished Tasks?", value=True)
 
-# Grouping options for Gantt chart
 st.sidebar.markdown("**Refine Gantt Grouping**")
 group_by_room = st.sidebar.checkbox("Group by Room", value=False)
 group_by_item = st.sidebar.checkbox("Group by Item", value=False)
 group_by_task = st.sidebar.checkbox("Group by Task", value=False)
 
-# Radio for color mode: Status or Progress
 color_mode = st.sidebar.radio("Color Gantt By:", ["Status", "Progress"], index=0)
 
-# Date range filter
 df_dates = df_filter.dropna(subset=["start_date", "end_date"])
 if df_dates.empty:
     default_min = datetime.today()
@@ -347,7 +385,6 @@ if not df_filtered.empty:
     df_gantt = df_filtered.copy()
     df_gantt["Display Status"] = df_gantt.apply(compute_display_status, axis=1)
     
-    # Build grouping for y-axis label
     group_cols = ["activity"]
     if group_by_room and "room" in df_gantt.columns:
         group_cols.append("room")
@@ -412,7 +449,7 @@ else:
     for idx, row in df_filtered.iterrows():
         st.markdown(f"**Task ID {row['id']} - {row['activity']} - {row['task']}**")
         if row["image_path"] and os.path.exists(row["image_path"]):
-            st.image(row["image_path"], caption=os.path.basename(row["image_path"]), use_column_width=True)
+            st.image(row["image_path"], caption=os.path.basename(row["image_path"]), use_container_width=True)
         else:
             st.write("No image found for this task.")
 
