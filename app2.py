@@ -134,11 +134,10 @@ selected_room_norm = st.sidebar.multiselect("Select Room (leave empty for all)",
 status_options = norm_unique("Status")
 selected_statuses = st.sidebar.multiselect("Select Status (leave empty for all)", options=status_options, default=[], key="selected_statuses")
 show_finished = st.sidebar.checkbox("Show Finished Tasks", value=True)
-# Independent refine options: let the user choose to refine by any of Task, Item, and Room.
+# Independent refine options: let the user choose whether to refine by Task, Item, and/or Room.
 refine_by_task = st.sidebar.checkbox("Refine by Task", value=False)
 refine_by_item = st.sidebar.checkbox("Refine by Item", value=False)
 refine_by_room = st.sidebar.checkbox("Refine by Room", value=False)
-# For date filtering
 min_date = edited_df["Start Date"].min()
 max_date = edited_df["End Date"].max()
 selected_date_range = st.sidebar.date_input("Select Date Range", value=[min_date, max_date], key="selected_date_range")
@@ -152,7 +151,6 @@ if st.sidebar.button("Clear Filters"):
     if hasattr(st, "experimental_rerun"):
         st.experimental_rerun()
 
-# Also define color_by_status (make sure it is defined before use)
 color_by_status = st.sidebar.checkbox("Color-code Gantt Chart by Activity Status", value=True, key="color_by_status")
 
 # ---------------------------------------------------
@@ -212,8 +210,9 @@ def create_gantt_chart(df_filtered, color_by_status=False):
         group_cols.append("Item")
     if refine_by_task:
         group_cols.append("Task")
-    
+        
     if color_by_status:
+        # For color coding, aggregate only Start Date and End Date.
         agg_df = df_filtered.groupby(group_cols).agg({
             "Start Date": "min",
             "End Date": "max"
@@ -244,13 +243,17 @@ def create_gantt_chart(df_filtered, color_by_status=False):
         )
         fig.update_layout(yaxis_title=y_axis_label)
     else:
-        agg_df = df_filtered.groupby(group_cols).agg({
-            "Start Date": "min",
-            "End Date": "max",
-            "Task": lambda x: ", ".join(sorted(set(x.dropna()))),
-            "Item": lambda x: ", ".join(sorted(set(x.dropna())))
-        }).reset_index()
-        agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
+        # When not color coding, aggregate additional columns only if not part of group_cols.
+        agg_dict = {"Start Date": "min", "End Date": "max"}
+        if "Task" not in group_cols:
+            agg_dict["Task"] = lambda x: ", ".join(sorted(set(x.dropna())))
+        if "Item" not in group_cols:
+            agg_dict["Item"] = lambda x: ", ".join(sorted(set(x.dropna())))
+        agg_df = df_filtered.groupby(group_cols).agg(agg_dict).reset_index()
+        if "Task" in agg_df.columns:
+            agg_df.rename(columns={"Task": "Tasks"}, inplace=True)
+        if "Item" in agg_df.columns:
+            agg_df.rename(columns={"Item": "Items"}, inplace=True)
         agg_df["Group Label"] = agg_df[group_cols].apply(lambda x: " | ".join(x.astype(str)), axis=1)
         y_axis_label = " | ".join(group_cols)
         fig = px.timeline(
@@ -264,8 +267,6 @@ def create_gantt_chart(df_filtered, color_by_status=False):
         )
         fig.update_layout(yaxis_title=y_axis_label)
     fig.update_yaxes(autorange="reversed")
-    # Remove fullscreen toggle by not setting config in layout;
-    # instead, pass the config in st.plotly_chart.
     fig.update_layout(xaxis_title="Timeline", template="plotly_white")
     return fig
 
@@ -299,8 +300,7 @@ status_summary = status_summary.sort_values("Order").drop("Order", axis=1)
 # 9. Additional Dashboard Features
 # ---------------------------------------------------
 today = pd.Timestamp(datetime.today().date())
-overdue_df = df_filtered[(df_filtered["End Date"] < today) &
-                         (df_filtered["Status"].str.strip().str.lower() != "finished")]
+overdue_df = df_filtered[(df_filtered["End Date"] < today) & (df_filtered["Status"].str.strip().str.lower() != "finished")]
 overdue_count = overdue_df.shape[0]
 task_distribution = df_filtered.groupby("Activity").size().reset_index(name="Task Count")
 dist_fig = px.bar(task_distribution, x="Activity", y="Task Count", title="Task Distribution by Activity")
@@ -474,7 +474,6 @@ with tabs[2]:
     
     st.markdown("---")
     
-    # Additional Templates Section (other template sections omitted for brevity)
     st.markdown("### Export Filtered Data")
     def convert_df_to_csv(df):
         return df.to_csv(index=False).encode("utf-8")
