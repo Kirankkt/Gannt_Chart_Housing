@@ -61,7 +61,7 @@ if st.button("Save Updates"):
     try:
         edited_df.to_excel(DATA_FILE, index=False)
         st.success("Data successfully saved!")
-        load_data.clear()
+        load_data.clear()  # Clear cache so next load uses updated data
     except Exception as e:
         st.error(f"Error saving data: {e}")
 
@@ -144,7 +144,7 @@ min_date = edited_df["Start Date"].min()
 max_date = edited_df["End Date"].max()
 selected_date_range = st.sidebar.date_input("Select Date Range", value=[min_date, max_date])
 
-# Define color_by_status before using it:
+# Ensure color_by_status is defined before use
 color_by_status = st.sidebar.checkbox("Color-code Gantt Chart by Activity Status", value=True, key="color_by_status")
 
 # ---------------------------------------------------
@@ -172,7 +172,7 @@ if len(selected_date_range) == 2:
 df_filtered.drop(columns=[c for c in df_filtered.columns if c.endswith("_norm")], inplace=True)
 
 # ---------------------------------------------------
-# 5. Helper Function: Compute Aggregated Status for an Activity
+# 5. Helper Function: Compute Aggregated Status for a Group
 # ---------------------------------------------------
 def aggregated_status(group_df):
     now = pd.Timestamp(datetime.today().date())
@@ -197,7 +197,6 @@ def aggregated_status(group_df):
 #    Group by Activity plus any additional fields per refine options.
 # ---------------------------------------------------
 def create_gantt_chart(df_filtered, color_by_status=False):
-    # Build grouping list starting with Activity.
     group_cols = ["Activity"]
     if refine_by_room:
         group_cols.append("Room")
@@ -207,10 +206,11 @@ def create_gantt_chart(df_filtered, color_by_status=False):
         group_cols.append("Task")
         
     if color_by_status:
-        agg_df = df_filtered.groupby(group_cols).agg({
+        # Use groupby with as_index=False to avoid duplicate column insertion issues.
+        agg_df = df_filtered.groupby(group_cols, as_index=False).agg({
             "Start Date": "min",
             "End Date": "max"
-        }).reset_index()
+        })
         def compute_group_status(row):
             cond = True
             for col in group_cols:
@@ -237,12 +237,12 @@ def create_gantt_chart(df_filtered, color_by_status=False):
         )
         fig.update_layout(yaxis_title=y_axis_label)
     else:
-        agg_df = df_filtered.groupby(group_cols).agg({
+        agg_df = df_filtered.groupby(group_cols, as_index=False).agg({
             "Start Date": "min",
             "End Date": "max",
             "Task": lambda x: ", ".join(sorted(set(x.dropna()))),
             "Item": lambda x: ", ".join(sorted(set(x.dropna())))
-        }).reset_index()
+        })
         agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
         agg_df["Group Label"] = agg_df[group_cols].apply(lambda x: " | ".join(x.astype(str)), axis=1)
         y_axis_label = " | ".join(group_cols)
@@ -290,7 +290,8 @@ status_summary = status_summary.sort_values("Order").drop("Order", axis=1)
 # 9. Additional Dashboard Features
 # ---------------------------------------------------
 today = pd.Timestamp(datetime.today().date())
-overdue_df = df_filtered[(df_filtered["End Date"] < today) & (df_filtered["Status"].str.strip().str.lower() != "finished")]
+overdue_df = df_filtered[(df_filtered["End Date"] < today) &
+                         (df_filtered["Status"].str.strip().str.lower() != "finished")]
 overdue_count = overdue_df.shape[0]
 task_distribution = df_filtered.groupby("Activity").size().reset_index(name="Task Count")
 dist_fig = px.bar(task_distribution, x="Activity", y="Task Count", title="Task Distribution by Activity")
@@ -323,11 +324,12 @@ tabs = st.tabs(["Dashboard", "Detailed Summary", "Reports"])
 # ---------- Dashboard Tab ----------
 with tabs[0]:
     st.header("Dashboard Overview")
-    # Instead of side-by-side layout, we display vertically so the sidebar remains visible.
+    # Display snapshot first, then the Gantt chart below
     st.subheader("Current Tasks Snapshot")
     st.dataframe(df_filtered)
     st.markdown("---")
     st.subheader("Project Timeline")
+    # Remove fullscreen toggle via config so the sidebar remains visible
     st.plotly_chart(gantt_fig, use_container_width=True, config={'modeBarButtonsToRemove': ['toggleFullscreen']})
     st.markdown("---")
     st.metric("Overall Completion", f"{completion_percentage:.1f}%")
