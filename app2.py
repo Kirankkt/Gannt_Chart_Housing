@@ -54,7 +54,6 @@ column_config = {
     )
 }
 edited_df = st.data_editor(df, column_config=column_config, use_container_width=True)
-# If the cell is empty or null, default it to "Not Started"
 edited_df["Status"] = edited_df["Status"].fillna("Not Started").replace("", "Not Started")
 
 # ---------------------------------------------------
@@ -83,19 +82,20 @@ with st.sidebar.form("add_column_form"):
         elif new_col_name in edited_df.columns:
             st.sidebar.error(f"Column '{new_col_name}' already exists.")
         else:
-            # Add new column to the DataFrame
             edited_df[new_col_name] = default_val
             try:
                 edited_df.to_excel(DATA_FILE, index=False)
                 st.sidebar.success(f"Column '{new_col_name}' added successfully!")
                 load_data.clear()
-                st.experimental_rerun()  # Force rerun so the data editor updates
+                if hasattr(st, "experimental_rerun"):
+                    st.experimental_rerun()
+                else:
+                    st.sidebar.info("Please refresh the page to see the updated columns.")
             except Exception as e:
                 st.sidebar.error(f"Error adding column: {e}")
 
-# Delete Column Form (now lists all columns)
+# Delete Column Form (lists all columns)
 with st.sidebar.form("delete_column_form"):
-    # List all columns in the current DataFrame
     all_columns = list(edited_df.columns)
     cols_to_delete = st.multiselect("Select Columns to Delete", options=all_columns)
     delete_submitted = st.form_submit_button("Delete Selected Columns")
@@ -108,7 +108,10 @@ with st.sidebar.form("delete_column_form"):
                 edited_df.to_excel(DATA_FILE, index=False)
                 st.sidebar.success("Selected columns deleted successfully!")
                 load_data.clear()
-                st.experimental_rerun()  # Force rerun so the data editor updates
+                if hasattr(st, "experimental_rerun"):
+                    st.experimental_rerun()
+                else:
+                    st.sidebar.info("Please refresh the page to see the updated columns.")
             except Exception as e:
                 st.sidebar.error(f"Error deleting columns: {e}")
 
@@ -139,7 +142,6 @@ selected_date_range = st.sidebar.date_input("Select Date Range", value=[min_date
 # 4. Filtering the DataFrame Based on User Input
 # ---------------------------------------------------
 df_filtered = edited_df.copy()
-# Create normalized helper columns for filtering
 for col in ["Activity", "Item", "Task", "Room", "Status"]:
     df_filtered[col + "_norm"] = df_filtered[col].astype(str).str.lower().str.strip()
 if selected_activity_norm:
