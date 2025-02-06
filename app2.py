@@ -206,7 +206,7 @@ def create_gantt_chart(df_filtered, color_by_status=False):
         group_cols.append("Task")
         
     if color_by_status:
-        # Use groupby with as_index=False to avoid duplicate column insertion issues.
+        # Use groupby with as_index=False to avoid duplicate insertion errors.
         agg_df = df_filtered.groupby(group_cols, as_index=False).agg({
             "Start Date": "min",
             "End Date": "max"
@@ -218,7 +218,8 @@ def create_gantt_chart(df_filtered, color_by_status=False):
             subset = df_filtered[cond]
             return aggregated_status(subset)
         agg_df["Display Status"] = agg_df.apply(compute_group_status, axis=1)
-        agg_df["Group Label"] = agg_df[group_cols].apply(lambda x: " | ".join(x.astype(str)), axis=1)
+        # Build Group Label without directly indexing with group_cols:
+        agg_df["Group Label"] = agg_df.apply(lambda row: " | ".join([str(row[col]) for col in group_cols]), axis=1)
         y_axis_label = " | ".join(group_cols)
         color_discrete_map = {
             "Not Started": "lightgray",
@@ -244,7 +245,7 @@ def create_gantt_chart(df_filtered, color_by_status=False):
             "Item": lambda x: ", ".join(sorted(set(x.dropna())))
         })
         agg_df.rename(columns={"Task": "Tasks", "Item": "Items"}, inplace=True)
-        agg_df["Group Label"] = agg_df[group_cols].apply(lambda x: " | ".join(x.astype(str)), axis=1)
+        agg_df["Group Label"] = agg_df.apply(lambda row: " | ".join([str(row[col]) for col in group_cols]), axis=1)
         y_axis_label = " | ".join(group_cols)
         fig = px.timeline(
             agg_df,
@@ -290,8 +291,7 @@ status_summary = status_summary.sort_values("Order").drop("Order", axis=1)
 # 9. Additional Dashboard Features
 # ---------------------------------------------------
 today = pd.Timestamp(datetime.today().date())
-overdue_df = df_filtered[(df_filtered["End Date"] < today) &
-                         (df_filtered["Status"].str.strip().str.lower() != "finished")]
+overdue_df = df_filtered[(df_filtered["End Date"] < today) & (df_filtered["Status"].str.strip().str.lower() != "finished")]
 overdue_count = overdue_df.shape[0]
 task_distribution = df_filtered.groupby("Activity").size().reset_index(name="Task Count")
 dist_fig = px.bar(task_distribution, x="Activity", y="Task Count", title="Task Distribution by Activity")
@@ -324,12 +324,10 @@ tabs = st.tabs(["Dashboard", "Detailed Summary", "Reports"])
 # ---------- Dashboard Tab ----------
 with tabs[0]:
     st.header("Dashboard Overview")
-    # Display snapshot first, then the Gantt chart below
     st.subheader("Current Tasks Snapshot")
     st.dataframe(df_filtered)
     st.markdown("---")
     st.subheader("Project Timeline")
-    # Remove fullscreen toggle via config so the sidebar remains visible
     st.plotly_chart(gantt_fig, use_container_width=True, config={'modeBarButtonsToRemove': ['toggleFullscreen']})
     st.markdown("---")
     st.metric("Overall Completion", f"{completion_percentage:.1f}%")
