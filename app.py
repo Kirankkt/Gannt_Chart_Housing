@@ -29,8 +29,10 @@ def load_data(file_path):
     return df
 
 def enforce_logic(df):
-    # Enforce that if Order Status is "Not Ordered", then Status must be "Not Started" and Progress = 0.
-    # And if Order Status is "Ordered" but Status is "Not Started", force Progress = 0.
+    # For each row, enforce:
+    # 1. If Order Status is "Not Ordered", force Status to "Not Started" and Progress to 0.
+    # 2. If Order Status is "Ordered" but Status is "Not Started", force Progress to 0.
+    # 3. If Status is Finished or Delivered, force Progress to 100.
     for idx, row in df.iterrows():
         order = row["Order Status"].strip().lower()
         status = row["Status"].strip().lower()
@@ -39,7 +41,6 @@ def enforce_logic(df):
             df.at[idx, "Progress"] = 0
         elif order == "ordered" and status == "not started":
             df.at[idx, "Progress"] = 0
-        # Optionally: if Status is finished or delivered, force Progress = 100.
         if status in ["finished", "delivered"]:
             df.at[idx, "Progress"] = 100
     return df
@@ -61,7 +62,7 @@ def create_gantt_chart(df_input):
         fig = px.scatter(title="No data to display")
         return fig
 
-    # Determine grouping columns based on sidebar settings stored in session_state.
+    # Determine grouping columns based on sidebar options stored in session_state.
     group_cols = ["Activity"]
     if st.session_state.get("group_by_room", False):
         group_cols.append("Room")
@@ -84,17 +85,13 @@ def create_gantt_chart(df_input):
         subset = df_input[cond]
         statuses = subset["Status"].str.strip().str.lower()
         now = pd.Timestamp(datetime.today().date())
-        # If any task is in progress, overall status is In Progress.
         if "in progress" in statuses.values:
             return "In Progress"
-        # If all tasks are finished or delivered, decide based on End Date.
         if all(status in ["finished", "delivered"] for status in statuses):
             max_end = subset["End Date"].max()
             return "Finished On Time" if now <= max_end else "Finished Late"
-        # If all tasks are not started, then "Not Started".
         if all(status == "not started" for status in statuses):
             return "Not Started"
-        # Otherwise, default to In Progress.
         return "In Progress"
     
     agg_df["Aggregated Status"] = agg_df.apply(compute_group_status, axis=1)
@@ -112,28 +109,18 @@ def create_gantt_chart(df_input):
         status = row["Aggregated Status"]
         label = row["Group Label"]
         total_sec = (end - start).total_seconds()
-        # Treat delivered or not delivered as Not Started (light gray).
-        if status.lower() in ["delivered", "not delivered"]:
-            seg_label = "Not Started"
+        # For tasks with Order Status "Not Ordered" (or 0 progress) treat as "Not Started".
+        if status.lower() in ["delivered", "not delivered"] or prog == 0:
             segments.append({
                 "Group Label": label,
-                "Segment": seg_label,
+                "Segment": "Not Started",
                 "Start": start,
                 "End": end,
                 "Progress": "0%"
             })
-        # For In Progress groups, if progress is 0, treat as Not Started.
+        # For In Progress groups with partial progress, split the bar.
         elif status == "In Progress":
-            if prog == 0:
-                segments.append({
-                    "Group Label": label,
-                    "Segment": "Not Started",
-                    "Start": start,
-                    "End": end,
-                    "Progress": "0%"
-                })
-            # If partial progress, split into two segments.
-            elif prog > 0 and prog < 100 and total_sec > 0:
+            if prog > 0 and prog < 100 and total_sec > 0:
                 completed_sec = total_sec * (prog / 100.0)
                 completed_end = start + pd.Timedelta(seconds=completed_sec)
                 segments.append({
@@ -159,7 +146,7 @@ def create_gantt_chart(df_input):
                     "Progress": f"{prog:.0f}%"
                 })
         else:
-            # For statuses such as Finished On Time or Finished Late, use the aggregated status.
+            # For finished tasks.
             segments.append({
                 "Group Label": label,
                 "Segment": status,
@@ -169,7 +156,7 @@ def create_gantt_chart(df_input):
             })
     seg_df = pd.DataFrame(segments)
 
-    # Define color mapping (using descriptive legend labels rather than raw colors).
+    # Define color mapping for segments (descriptive labels).
     color_map = {
         "Not Started": "lightgray",
         "Finished On Time": "green",
@@ -204,12 +191,12 @@ DATA_FILE = "construction_timeline.xlsx"
 if "df" not in st.session_state:
     st.session_state.df = load_data(DATA_FILE)
 
-# Ensure filter keys exist in session_state.
+# Ensure filter keys exist.
 for key in ["filter_activity", "filter_item", "filter_task", "filter_room", "filter_status", "filter_order_status"]:
     if key not in st.session_state:
         st.session_state[key] = []
 
-# For grouping options (default False)
+# Grouping options defaults.
 for key in ["group_by_room", "group_by_item", "group_by_task"]:
     if key not in st.session_state:
         st.session_state[key] = False
@@ -219,6 +206,7 @@ for key in ["group_by_room", "group_by_item", "group_by_task"]:
 ##############################################
 
 st.sidebar.header("Filter Options")
+
 def norm_unique(col):
     return sorted(set(st.session_state.df[col].dropna().astype(str).str.lower().str.strip()))
 
@@ -239,7 +227,7 @@ if st.sidebar.button("Clear Filters"):
     for key in ["filter_activity", "filter_item", "filter_task", "filter_room", "filter_status", "filter_order_status"]:
         st.session_state[key] = []
 
-# Sidebar grouping options for Gantt chart.
+# Sidebar grouping options.
 st.sidebar.markdown("**Gantt Grouping Options**")
 st.session_state.group_by_room = st.sidebar.checkbox("Group by Room", value=st.session_state.get("group_by_room", False))
 st.session_state.group_by_item = st.sidebar.checkbox("Group by Item", value=st.session_state.get("group_by_item", False))
@@ -255,9 +243,9 @@ selected_dates = st.sidebar.date_input("Select Date Range", value=[min_date, max
 ##############################################
 
 st.sidebar.header("Manage Rows & Columns")
+
 with st.sidebar.expander("Rows"):
     if st.sidebar.button("Add New Row"):
-        # Use pd.concat instead of .append to add a new row.
         new_row = {
             "Activity": "",
             "Item": "",
@@ -269,6 +257,7 @@ with st.sidebar.expander("Rows"):
             "Order Status": "Not Ordered",
             "Progress": 0
         }
+        # Use pd.concat to add a new row.
         new_row_df = pd.DataFrame([new_row])
         st.session_state.df = pd.concat([st.session_state.df, new_row_df], ignore_index=True)
     row_to_delete = st.sidebar.text_input("Row Number to Delete", value="")
@@ -313,7 +302,6 @@ if selected_statuses:
     df_filtered = df_filtered[df_filtered["Status_norm"].isin(selected_statuses)]
 if selected_order_statuses:
     df_filtered = df_filtered[df_filtered["Order Status_norm"].isin(selected_order_statuses)]
-
 if len(selected_dates) == 2:
     start_range = pd.to_datetime(selected_dates[0])
     end_range = pd.to_datetime(selected_dates[1])
@@ -327,22 +315,62 @@ df_filtered.drop(columns=[col for col in df_filtered.columns if col.endswith("_n
 st.subheader("Update Task Information")
 st.markdown("""
 - Edit the table below. (Use the sidebar “Add New Row” button to add rows.)
-- **Status** must be one of: Finished, In Progress, Not Started, Delivered, Not Delivered.
-- **Order Status** must be either Ordered or Not Ordered.
-- **Progress** should be between 0 and 100.
+- **Status** (dropdown): If **Order Status** is “Not Ordered”, please select only “Not Started”.
+- **Order Status** (dropdown): Choose “Ordered” if materials have been ordered.
+- **Progress** (number): Enter a percentage (0–100). (If **Order Status** is “Not Ordered” or **Status** is “Not Started”, progress will be forced to 0.)
 """)
-# Display the editable table.
-edited_df = st.data_editor(st.session_state.df, use_container_width=True, num_rows=st.session_state.df.shape[0])
-st.session_state.df = edited_df  # update session state
+# Configure column editors with tooltips.
+column_config = {
+    "Activity": st.column_config.SelectboxColumn(
+         "Activity",
+         options=sorted(st.session_state.df["Activity"].dropna().unique()),
+         help="Select an activity. You may type a new value if needed."
+    ),
+    "Item": st.column_config.SelectboxColumn(
+         "Item",
+         options=sorted(st.session_state.df["Item"].dropna().unique()),
+         help="Select an item. You may type a new value if needed."
+    ),
+    "Task": st.column_config.SelectboxColumn(
+         "Task",
+         options=sorted(st.session_state.df["Task"].dropna().unique()),
+         help="Select a task. You may type a new value if needed."
+    ),
+    "Room": st.column_config.SelectboxColumn(
+         "Room",
+         options=sorted(st.session_state.df["Room"].dropna().unique()),
+         help="Select a room. You may type a new value if needed."
+    ),
+    "Status": st.column_config.SelectboxColumn(
+         "Status",
+         options=["Finished", "In Progress", "Not Started", "Delivered", "Not Delivered"],
+         help="If Order Status is 'Not Ordered', only 'Not Started' is allowed."
+    ),
+    "Order Status": st.column_config.SelectboxColumn(
+         "Order Status",
+         options=["Ordered", "Not Ordered"],
+         help="Select 'Ordered' if materials have been ordered, otherwise 'Not Ordered'."
+    ),
+    "Progress": st.column_config.NumberColumn(
+         "Progress",
+         help="Enter progress as a percentage (0-100).",
+         min_value=0,
+         max_value=100,
+         step=1
+    )
+}
+
+edited_df = st.data_editor(st.session_state.df, use_container_width=True, num_rows=st.session_state.df.shape[0], column_config=column_config)
+st.session_state.df = edited_df  # update session state with latest edits
 
 ##############################################
-# Save Updates Button – Enforce Logical Rules and Save
+# Save Updates Button – Enforce Logic and Save
 ##############################################
 
 if st.button("Save Updates"):
     st.session_state.df = enforce_logic(st.session_state.df)
     save_data(st.session_state.df, DATA_FILE)
-    # No rerun command is used here.
+    # Note: The app does not call st.experimental_rerun; refresh the page if needed.
 
 ##############################################
 # Dashboard Overview
@@ -364,9 +392,7 @@ total_tasks = st.session_state.df.shape[0]
 finished_tasks = st.session_state.df[st.session_state.df["Status"].str.strip().str.lower().isin(["finished", "delivered"])].shape[0]
 completion_percentage = (finished_tasks / total_tasks) * 100 if total_tasks > 0 else 0
 in_progress_tasks = st.session_state.df[st.session_state.df["Status"].str.strip().str.lower() == "in progress"].shape[0]
-not_declared = st.session_state.df[~st.session_state.df["Status"].str.strip().str.lower().isin(
-    ["finished", "in progress", "delivered", "not started"]
-)].shape[0]
+not_declared = st.session_state.df[~st.session_state.df["Status"].str.strip().str.lower().isin(["finished", "in progress", "delivered", "not started"])].shape[0]
 
 st.metric("Overall Completion", f"{completion_percentage:.1f}%")
 st.progress(completion_percentage / 100)
