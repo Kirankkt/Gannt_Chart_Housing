@@ -33,31 +33,7 @@ def load_data(file_path):
     df["Progress"] = pd.to_numeric(df["Progress"], errors="coerce").fillna(0)
     return df
 
-def enforce_logic(df):
-    """
-    Enforce the business rules:
-      - If Order Status is "Not Ordered", work cannot begin:
-           * Force Status to "Not Started" and Progress to 0.
-      - If Order Status is "Ordered" but Status is "Not Started", Progress remains 0.
-      - If Status is "Finished" or "Delivered", Progress is forced to 100.
-    """
-    for idx, row in df.iterrows():
-        order_status = row["Order Status"].strip().lower()
-        status = row["Status"].strip().lower()
-        progress = row["Progress"]
-        if order_status == "not ordered":
-            df.at[idx, "Status"] = "Not Started"
-            df.at[idx, "Progress"] = 0
-        else:  # order_status == "ordered"
-            if status == "not started":
-                df.at[idx, "Progress"] = 0
-            elif status == "in progress":
-                df.at[idx, "Progress"] = max(0, min(100, progress))
-            elif status in ["finished", "delivered"]:
-                df.at[idx, "Progress"] = 100
-            else:
-                df.at[idx, "Progress"] = max(0, min(100, progress))
-    return df
+# (The enforce_logic() function has been removed as per your request.)
 
 def save_data(df, file_path):
     try:
@@ -67,20 +43,30 @@ def save_data(df, file_path):
         st.error(f"Error saving data: {e}")
 
 ##############################################
-# Gantt Chart Generation
+# Gantt Chart Generation (Refined Grouping)
 ##############################################
 
 def create_gantt_chart(df_input):
     if df_input.empty:
         return px.scatter(title="No data to display")
     
-    # For simplicity, we group by Activity (you can extend to more grouping as needed)
+    # Build grouping columns based on sidebar options.
     group_cols = ["Activity"]
+    if st.session_state.get("group_by_room", False):
+        group_cols.append("Room")
+    if st.session_state.get("group_by_item", False):
+        group_cols.append("Item")
+    if st.session_state.get("group_by_task", False):
+        group_cols.append("Task")
+    
+    # Aggregate data: minimum Start Date, maximum End Date, and average Progress.
     agg_dict = {"Start Date": "min", "End Date": "max", "Progress": "mean"}
     agg_df = df_input.groupby(group_cols).agg(agg_dict).reset_index()
     
     # Compute an aggregated status per group.
     def compute_group_status(row):
+        # For simplicity, if any row in the group is in progress, label as "In Progress",
+        # if all rows are finished/delivered, label as "Finished", otherwise "Not Started".
         cond = True
         for col in group_cols:
             cond = cond & (df_input[col] == row[col])
@@ -108,7 +94,7 @@ def create_gantt_chart(df_input):
         if status.lower() == "not started" or prog == 0:
             seg["Segment"] = "Not Started"
             seg["Progress"] = "0%"
-        # If In Progress with partial progress, split into two segments.
+        # If In Progress with partial progress, split the bar.
         elif status.lower() == "in progress" and 0 < prog < 100:
             total_sec = (row["End Date"] - row["Start Date"]).total_seconds()
             completed_sec = total_sec * (prog / 100.0)
@@ -137,7 +123,7 @@ def create_gantt_chart(df_input):
         segments.append(seg)
     seg_df = pd.DataFrame(segments)
     
-    # Define color mapping.
+    # Define a color mapping.
     color_map = {
         "Not Started": "lightgray",
         "In Progress": "darkblue",
@@ -169,11 +155,9 @@ def create_gantt_chart(df_input):
 st.set_page_config(page_title="Construction Project Manager Dashboard", layout="wide")
 st.title("Construction Project Manager Dashboard")
 
-# Load data into session_state (if not already loaded)
 if "df" not in st.session_state:
     st.session_state.df = load_data(DATA_FILE)
-
-# Before editing, ensure that all object-type columns (e.g. "Notes") are explicitly cast to string.
+# Before launching the editor, ensure that all object columns are explicitly strings.
 df_for_edit = st.session_state.df.copy()
 for col in df_for_edit.columns:
     if df_for_edit[col].dtype == "object":
@@ -286,9 +270,9 @@ df_filtered.drop(columns=[col for col in df_filtered.columns if col.endswith("_n
 st.subheader("Update Task Information")
 st.markdown("""
 - For **Activity**, **Item**, **Task**, and **Room** you may select an existing value or type a new one.
-- **Order Status** (dropdown): Choose “Not Ordered” if materials have not been ordered; if so, **Status** will be forced to “Not Started” and **Progress** will remain 0.
+- **Order Status** (dropdown): Choose “Not Ordered” if materials have not been ordered; if so, **Status** will remain as entered.
 - When **Order Status** is “Ordered”, the **Status** dropdown offers all options.
-- **Progress** (number): If **Order Status** is “Not Ordered” or **Status** is “Not Started”, progress will be forced to 0. If **Status** is “In Progress”, you may enter a value between 1 and 99. If **Status** is “Finished” or “Delivered”, progress will be forced to 100.
+- **Progress** (number): You may update this field freely.
 """)
 column_config = {
     "Activity": st.column_config.SelectboxColumn(
@@ -314,7 +298,7 @@ column_config = {
     "Status": st.column_config.SelectboxColumn(
          "Status",
          options=["Not Started", "In Progress", "Finished", "Delivered", "Not Delivered"],
-         help="If Order Status is 'Not Ordered', only 'Not Started' is allowed."
+         help="Select the overall status."
     ),
     "Order Status": st.column_config.SelectboxColumn(
          "Order Status",
@@ -323,28 +307,26 @@ column_config = {
     ),
     "Progress": st.column_config.NumberColumn(
          "Progress",
-         help="Enter a percentage (0–100). This field is only updatable when Order Status is 'Ordered' and Status is 'In Progress'.",
+         help="Enter a percentage (0–100).",
          min_value=0,
          max_value=100,
          step=1
     )
 }
 
-# Before launching the data editor, make sure our DataFrame is sanitized.
+# Launch the data editor. (Note: The data editor’s state may not always update instantly.)
 df_for_editor = st.session_state.df.copy()
 for col in df_for_editor.columns:
     if df_for_editor[col].dtype == "object":
         df_for_editor[col] = df_for_editor[col].astype(str)
-
 edited_df = st.data_editor(df_for_editor, use_container_width=True, num_rows=st.session_state.df.shape[0], column_config=column_config)
-st.session_state.df = edited_df  # update session state with the edited version
+st.session_state.df = edited_df  # Update session state with the edited version
 
 ##############################################
-# Save Updates Button – Enforce Logic and Save
+# Save Updates Button – Save Without Enforcing Extra Logic
 ##############################################
 
 if st.button("Save Updates"):
-    st.session_state.df = enforce_logic(st.session_state.df)
     save_data(st.session_state.df, DATA_FILE)
     st.success("Your changes have been saved.")
 
@@ -358,7 +340,7 @@ st.header("Dashboard Overview")
 st.subheader("Current Tasks Snapshot")
 st.dataframe(df_filtered)
 
-# 2) Gantt Chart (regenerated from filtered data)
+# 2) Gantt Chart (regenerated from filtered data with refined grouping)
 st.subheader("Project Timeline")
 gantt_fig = create_gantt_chart(df_filtered)
 st.plotly_chart(gantt_fig, use_container_width=True)
