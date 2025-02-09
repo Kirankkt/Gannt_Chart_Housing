@@ -22,7 +22,7 @@ def load_data(file_path):
     # Ensure key text columns are strings
     for col in ["Status", "Activity", "Item", "Task", "Room"]:
         df[col] = df[col].astype(str)
-    # If there is a "Notes" column, force it to string.
+    # If a "Notes" column exists, force it to string
     if "Notes" in df.columns:
         df["Notes"] = df["Notes"].astype(str)
     # Add new columns if missing
@@ -32,8 +32,6 @@ def load_data(file_path):
         df["Progress"] = 0
     df["Progress"] = pd.to_numeric(df["Progress"], errors="coerce").fillna(0)
     return df
-
-# (The enforce_logic() function has been removed as per your request.)
 
 def save_data(df, file_path):
     try:
@@ -63,10 +61,8 @@ def create_gantt_chart(df_input):
     agg_dict = {"Start Date": "min", "End Date": "max", "Progress": "mean"}
     agg_df = df_input.groupby(group_cols).agg(agg_dict).reset_index()
     
-    # Compute an aggregated status per group.
+    # Compute a simple aggregated status per group.
     def compute_group_status(row):
-        # For simplicity, if any row in the group is in progress, label as "In Progress",
-        # if all rows are finished/delivered, label as "Finished", otherwise "Not Started".
         cond = True
         for col in group_cols:
             cond = cond & (df_input[col] == row[col])
@@ -123,7 +119,7 @@ def create_gantt_chart(df_input):
         segments.append(seg)
     seg_df = pd.DataFrame(segments)
     
-    # Define a color mapping.
+    # Define color mapping.
     color_map = {
         "Not Started": "lightgray",
         "In Progress": "darkblue",
@@ -155,20 +151,19 @@ def create_gantt_chart(df_input):
 st.set_page_config(page_title="Construction Project Manager Dashboard", layout="wide")
 st.title("Construction Project Manager Dashboard")
 
+# Load data only once.
 if "df" not in st.session_state:
     st.session_state.df = load_data(DATA_FILE)
-# Before launching the editor, ensure that all object columns are explicitly strings.
-df_for_edit = st.session_state.df.copy()
-for col in df_for_edit.columns:
-    if df_for_edit[col].dtype == "object":
-        df_for_edit[col] = df_for_edit[col].astype(str)
-st.session_state.df = df_for_edit
+    
+# Do NOT reassign or re-sanitize st.session_state.df on every run.
+# (This ensures that user edits persist until saved.)
 
 ##############################################
 # Sidebar – Filters and Management
 ##############################################
 
 st.sidebar.header("Filter Options")
+
 def norm_unique(col):
     return sorted(set(st.session_state.df[col].dropna().astype(str).str.lower().str.strip()))
 
@@ -270,9 +265,9 @@ df_filtered.drop(columns=[col for col in df_filtered.columns if col.endswith("_n
 st.subheader("Update Task Information")
 st.markdown("""
 - For **Activity**, **Item**, **Task**, and **Room** you may select an existing value or type a new one.
-- **Order Status** (dropdown): Choose “Not Ordered” if materials have not been ordered; if so, **Status** will remain as entered.
-- When **Order Status** is “Ordered”, the **Status** dropdown offers all options.
-- **Progress** (number): You may update this field freely.
+- **Order Status** (dropdown): Choose "Not Ordered" or "Ordered" as appropriate.
+- **Status** (dropdown): Select the overall status.
+- **Progress** (number): Enter a percentage (0–100).
 """)
 column_config = {
     "Activity": st.column_config.SelectboxColumn(
@@ -314,16 +309,12 @@ column_config = {
     )
 }
 
-# Launch the data editor. (Note: The data editor’s state may not always update instantly.)
-df_for_editor = st.session_state.df.copy()
-for col in df_for_editor.columns:
-    if df_for_editor[col].dtype == "object":
-        df_for_editor[col] = df_for_editor[col].astype(str)
-edited_df = st.data_editor(df_for_editor, use_container_width=True, num_rows=st.session_state.df.shape[0], column_config=column_config)
-st.session_state.df = edited_df  # Update session state with the edited version
+# Launch the data editor.
+edited_df = st.data_editor("Edit Task Information", st.session_state.df, use_container_width=True)
+st.session_state.df = edited_df  # Update session state with the edited values
 
 ##############################################
-# Save Updates Button – Save Without Enforcing Extra Logic
+# Save Updates Button – Save the Current DataFrame
 ##############################################
 
 if st.button("Save Updates"):
@@ -350,9 +341,7 @@ total_tasks = st.session_state.df.shape[0]
 finished_tasks = st.session_state.df[st.session_state.df["Status"].str.strip().str.lower().isin(["finished", "delivered"])].shape[0]
 completion_percentage = (finished_tasks / total_tasks) * 100 if total_tasks > 0 else 0
 in_progress_tasks = st.session_state.df[st.session_state.df["Status"].str.strip().str.lower() == "in progress"].shape[0]
-not_declared = st.session_state.df[~st.session_state.df["Status"].str.strip().str.lower().isin(
-    ["finished", "in progress", "delivered", "not started"]
-)].shape[0]
+not_declared = st.session_state.df[~st.session_state.df["Status"].str.strip().str.lower().isin(["finished", "in progress", "delivered", "not started"])].shape[0]
 
 st.metric("Overall Completion", f"{completion_percentage:.1f}%")
 st.progress(completion_percentage / 100)
