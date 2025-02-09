@@ -2,8 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import sqlite3
-import os
-from datetime import datetime
+from datetime import datetime, date, timedelta
 
 ##############################################
 # Database Functions (SQLite Backend)
@@ -12,7 +11,7 @@ from datetime import datetime
 DB_FILE = "tasks.db"
 
 def init_db():
-    """Initialize the SQLite database and create the tasks table if not exists."""
+    """Initialize the SQLite database and create the tasks table if it does not exist."""
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("""
@@ -36,30 +35,30 @@ def load_data_from_db(conn):
     """Load tasks from the database into a DataFrame."""
     df = pd.read_sql_query("SELECT * FROM tasks", conn)
     if not df.empty:
-        # Convert date strings back to datetime objects
+        # Convert ISO date strings to datetime objects
         df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce")
         df["End Date"] = pd.to_datetime(df["End Date"], errors="coerce")
     return df
 
 def save_data_to_db(df, conn):
-    """Save the DataFrame to the tasks table in the database (replace the table)."""
-    # Before saving, convert datetime columns to ISO format strings
+    """Save the DataFrame to the tasks table in the database (replacing the table)."""
     df_copy = df.copy()
+    # Convert datetime columns to ISO date strings (or None if missing)
     if "Start Date" in df_copy.columns:
-        df_copy["Start Date"] = df_copy["Start Date"].dt.strftime("%Y-%m-%d")
+        df_copy["Start Date"] = df_copy["Start Date"].apply(lambda x: x.strftime("%Y-%m-%d") if pd.notnull(x) else None)
     if "End Date" in df_copy.columns:
-        df_copy["End Date"] = df_copy["End Date"].dt.strftime("%Y-%m-%d")
+        df_copy["End Date"] = df_copy["End Date"].apply(lambda x: x.strftime("%Y-%m-%d") if pd.notnull(x) else None)
     df_copy.to_sql("tasks", conn, if_exists="replace", index=False)
 
 ##############################################
-# Gantt Chart Generation (Refined Grouping)
+# Gantt Chart Generation (with Refined Grouping)
 ##############################################
 
 def create_gantt_chart(df_input):
     if df_input.empty:
         return px.scatter(title="No data to display")
     
-    # Build grouping columns based on sidebar checkboxes.
+    # Build grouping columns based on sidebar options.
     group_cols = ["Activity"]
     if st.session_state.get("group_by_room", False):
         group_cols.append("Room")
@@ -68,11 +67,11 @@ def create_gantt_chart(df_input):
     if st.session_state.get("group_by_task", False):
         group_cols.append("Task")
     
-    # Aggregate data: get min start date, max end date, average progress.
+    # Aggregate data: minimum Start Date, maximum End Date, average Progress.
     agg_dict = {"Start Date": "min", "End Date": "max", "Progress": "mean"}
     agg_df = df_input.groupby(group_cols).agg(agg_dict).reset_index()
     
-    # Compute a simple aggregated status for each group.
+    # Compute an aggregated status per group (simple logic):
     def compute_group_status(row):
         cond = True
         for col in group_cols:
@@ -91,10 +90,7 @@ def create_gantt_chart(df_input):
     # Build timeline segments.
     segments = []
     for _, row in agg_df.iterrows():
-        seg = {}
-        seg["Group Label"] = row["Group Label"]
-        seg["Start"] = row["Start Date"]
-        seg["End"] = row["End Date"]
+        seg = {"Group Label": row["Group Label"], "Start": row["Start Date"], "End": row["End Date"]}
         prog = row["Progress"]
         status = row["Aggregated Status"]
         if status.lower() == "not started" or prog == 0:
@@ -127,7 +123,7 @@ def create_gantt_chart(df_input):
         segments.append(seg)
     seg_df = pd.DataFrame(segments)
     
-    # Define a color mapping.
+    # Define color mapping.
     color_map = {
         "Not Started": "lightgray",
         "In Progress": "darkblue",
@@ -159,36 +155,37 @@ def create_gantt_chart(df_input):
 st.set_page_config(page_title="Construction Project Manager Dashboard", layout="wide")
 st.title("Construction Project Manager Dashboard")
 
-# Initialize the SQLite database connection.
+# Initialize SQLite database connection.
 conn = init_db()
 
 # Load data from the database into session state only once.
 if "df" not in st.session_state:
     st.session_state.df = load_data_from_db(conn)
+    # If the table is empty, initialize with the expected columns.
+    if st.session_state.df.empty:
+        st.session_state.df = pd.DataFrame(columns=["Activity", "Item", "Task", "Room", "Start Date", "End Date", "Status", "Order Status", "Progress", "Notes"])
 
-# Do not reassign st.session_state.df on every run—this way edits in the editor persist until saved.
+# Do not overwrite st.session_state.df on every run so that edits persist.
 
 ##############################################
 # Data Editor Section
 ##############################################
 
 st.subheader("Edit Task Information")
-# Use the data editor to allow updates. (Do not pass an extra label string.)
-editor_value = st.data_editor(st.session_state.df, key="data_editor")
-
-# Provide a Save Updates button.
+# The data editor allows the user to make updates. Changes are stored locally in editor_df.
+editor_df = st.data_editor(st.session_state.df, key="data_editor")
 if st.button("Save Updates"):
-    # Save the updated data to session state and to the database.
-    st.session_state.df = editor_value.copy()
+    st.session_state.df = editor_df.copy()
     save_data_to_db(st.session_state.df, conn)
     st.success("Your changes have been saved.")
-    st.experimental_rerun()  # Force refresh so dashboard components update
+    st.experimental_rerun()  # Refresh the app so dashboard components update
 
 ##############################################
-# Sidebar – Filters and Management
+# Sidebar – Filters and Grouping Options
 ##############################################
 
 st.sidebar.header("Filter Options")
+
 def norm_unique(col):
     return sorted(set(st.session_state.df[col].dropna().astype(str).str.lower().str.strip()))
 
@@ -211,9 +208,18 @@ st.session_state.group_by_room = group_by_room
 st.session_state.group_by_item = group_by_item
 st.session_state.group_by_task = group_by_task
 
-min_date = st.session_state.df["Start Date"].min()
-max_date = st.session_state.df["End Date"].max()
-selected_dates = st.sidebar.date_input("Select Date Range", value=[min_date, max_date])
+# Date range filter – ensure valid date objects.
+if not st.session_state.df.empty and pd.notnull(st.session_state.df["Start Date"].min()):
+    min_date_val = st.session_state.df["Start Date"].min().date()
+else:
+    min_date_val = date.today()
+
+if not st.session_state.df.empty and pd.notnull(st.session_state.df["End Date"].max()):
+    max_date_val = st.session_state.df["End Date"].max().date()
+else:
+    max_date_val = date.today()
+
+selected_dates = st.sidebar.date_input("Select Date Range", value=[min_date_val, max_date_val])
 
 ##############################################
 # Sidebar – Manage Rows & Columns
@@ -227,10 +233,10 @@ with st.sidebar.expander("Rows"):
             "Item": "",
             "Task": "",
             "Room": "",
-            "Start Date": pd.NaT,
-            "End Date": pd.NaT,
-            "Status": "Not Started",
-            "Order Status": "Not Ordered",
+            "Start Date": None,
+            "End Date": None,
+            "Status": "",
+            "Order Status": "",
             "Progress": 0,
             "Notes": ""
         }
@@ -278,7 +284,7 @@ if selected_statuses:
     df_filtered = df_filtered[df_filtered["Status_norm"].isin(selected_statuses)]
 if selected_order_statuses:
     df_filtered = df_filtered[df_filtered["Order Status_norm"].isin(selected_order_statuses)]
-if len(selected_dates) == 2:
+if isinstance(selected_dates, list) and len(selected_dates) == 2:
     start_range = pd.to_datetime(selected_dates[0])
     end_range = pd.to_datetime(selected_dates[1])
     df_filtered = df_filtered[(df_filtered["Start Date"] >= start_range) & (df_filtered["End Date"] <= end_range)]
@@ -290,16 +296,13 @@ df_filtered.drop(columns=[col for col in df_filtered.columns if col.endswith("_n
 
 st.header("Dashboard Overview")
 
-# 1) Snapshot of Filtered Data
 st.subheader("Current Tasks Snapshot")
 st.dataframe(df_filtered)
 
-# 2) Gantt Chart (regenerated from filtered data with refined grouping)
 st.subheader("Project Timeline")
 gantt_fig = create_gantt_chart(df_filtered)
 st.plotly_chart(gantt_fig, use_container_width=True)
 
-# 3) KPIs & Progress
 total_tasks = st.session_state.df.shape[0]
 finished_tasks = st.session_state.df[st.session_state.df["Status"].str.strip().str.lower().isin(["finished", "delivered"])].shape[0]
 completion_percentage = (finished_tasks / total_tasks) * 100 if total_tasks > 0 else 0
@@ -312,8 +315,8 @@ st.metric("Overall Completion", f"{completion_percentage:.1f}%")
 st.progress(completion_percentage / 100)
 
 st.markdown("#### Additional Insights")
-today = pd.Timestamp(datetime.today().date())
-overdue_df = df_filtered[(df_filtered["End Date"] < today) &
+today_val = pd.Timestamp(datetime.today().date())
+overdue_df = df_filtered[(df_filtered["End Date"] < today_val) &
                          (~df_filtered["Status"].str.strip().str.lower().isin(["finished", "delivered"]))]
 st.markdown(f"**Overdue Tasks:** {overdue_df.shape[0]}")
 if not overdue_df.empty:
@@ -323,7 +326,7 @@ task_dist = df_filtered.groupby("Activity").size().reset_index(name="Task Count"
 dist_fig = px.bar(task_dist, x="Activity", y="Task Count", title="Task Distribution by Activity")
 st.plotly_chart(dist_fig, use_container_width=True)
 
-upcoming_df = df_filtered[(df_filtered["Start Date"] >= today) & (df_filtered["Start Date"] <= today + pd.Timedelta(days=7))]
+upcoming_df = df_filtered[(df_filtered["Start Date"] >= today_val) & (df_filtered["Start Date"] <= today_val + timedelta(days=7))]
 st.markdown("**Upcoming Tasks (Next 7 Days):**")
 if not upcoming_df.empty:
     st.dataframe(upcoming_df[["Activity", "Room", "Task", "Start Date", "Status", "Order Status"]])
