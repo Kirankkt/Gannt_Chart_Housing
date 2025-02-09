@@ -35,7 +35,7 @@ def load_data_from_db(conn):
     """Load tasks from the database into a DataFrame."""
     df = pd.read_sql_query("SELECT * FROM tasks", conn)
     if not df.empty:
-        # Convert ISO date strings to datetime objects
+        # Convert ISO date strings to datetime objects; if conversion fails, they become NaT.
         df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce")
         df["End Date"] = pd.to_datetime(df["End Date"], errors="coerce")
     return df
@@ -58,7 +58,7 @@ def create_gantt_chart(df_input):
     if df_input.empty:
         return px.scatter(title="No data to display")
     
-    # Build grouping columns based on sidebar options.
+    # Determine grouping columns based on sidebar checkboxes.
     group_cols = ["Activity"]
     if st.session_state.get("group_by_room", False):
         group_cols.append("Room")
@@ -67,11 +67,11 @@ def create_gantt_chart(df_input):
     if st.session_state.get("group_by_task", False):
         group_cols.append("Task")
     
-    # Aggregate data: minimum Start Date, maximum End Date, average Progress.
+    # Aggregate data: get min Start Date, max End Date, and average Progress.
     agg_dict = {"Start Date": "min", "End Date": "max", "Progress": "mean"}
     agg_df = df_input.groupby(group_cols).agg(agg_dict).reset_index()
     
-    # Compute an aggregated status per group (simple logic):
+    # Compute an aggregated status per group (simple logic).
     def compute_group_status(row):
         cond = True
         for col in group_cols:
@@ -155,30 +155,31 @@ def create_gantt_chart(df_input):
 st.set_page_config(page_title="Construction Project Manager Dashboard", layout="wide")
 st.title("Construction Project Manager Dashboard")
 
-# Initialize SQLite database connection.
+# Initialize the SQLite database connection.
 conn = init_db()
 
 # Load data from the database into session state only once.
 if "df" not in st.session_state:
     st.session_state.df = load_data_from_db(conn)
-    # If the table is empty, initialize with the expected columns.
     if st.session_state.df.empty:
+        # If no data exists, create an empty DataFrame with the expected columns.
         st.session_state.df = pd.DataFrame(columns=["Activity", "Item", "Task", "Room", "Start Date", "End Date", "Status", "Order Status", "Progress", "Notes"])
 
-# Do not overwrite st.session_state.df on every run so that edits persist.
+# Do not reassign st.session_state.df on every run so that edits persist.
 
 ##############################################
 # Data Editor Section
 ##############################################
 
 st.subheader("Edit Task Information")
-# The data editor allows the user to make updates. Changes are stored locally in editor_df.
+# The data editor shows the current DataFrame.
 editor_df = st.data_editor(st.session_state.df, key="data_editor")
 if st.button("Save Updates"):
     st.session_state.df = editor_df.copy()
     save_data_to_db(st.session_state.df, conn)
     st.success("Your changes have been saved.")
-    st.experimental_rerun()  # Refresh the app so dashboard components update
+    # Note: st.experimental_rerun() is not used because your version doesn't support it.
+    # You may need to manually refresh the page for dashboard components to update.
 
 ##############################################
 # Sidebar – Filters and Grouping Options
@@ -208,12 +209,11 @@ st.session_state.group_by_room = group_by_room
 st.session_state.group_by_item = group_by_item
 st.session_state.group_by_task = group_by_task
 
-# Date range filter – ensure valid date objects.
+# Date range filter – ensure valid default dates.
 if not st.session_state.df.empty and pd.notnull(st.session_state.df["Start Date"].min()):
     min_date_val = st.session_state.df["Start Date"].min().date()
 else:
     min_date_val = date.today()
-
 if not st.session_state.df.empty and pd.notnull(st.session_state.df["End Date"].max()):
     max_date_val = st.session_state.df["End Date"].max().date()
 else:
@@ -307,9 +307,7 @@ total_tasks = st.session_state.df.shape[0]
 finished_tasks = st.session_state.df[st.session_state.df["Status"].str.strip().str.lower().isin(["finished", "delivered"])].shape[0]
 completion_percentage = (finished_tasks / total_tasks) * 100 if total_tasks > 0 else 0
 in_progress_tasks = st.session_state.df[st.session_state.df["Status"].str.strip().str.lower() == "in progress"].shape[0]
-not_declared = st.session_state.df[~st.session_state.df["Status"].str.strip().str.lower().isin(
-    ["finished", "in progress", "delivered", "not started"]
-)].shape[0]
+not_declared = st.session_state.df[~st.session_state.df["Status"].str.strip().str.lower().isin(["finished", "in progress", "delivered", "not started"])].shape[0]
 
 st.metric("Overall Completion", f"{completion_percentage:.1f}%")
 st.progress(completion_percentage / 100)
