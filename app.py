@@ -1,47 +1,58 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import sqlite3
 import os
 from datetime import datetime
 
 ##############################################
-# Utility Functions
+# Database Functions (SQLite Backend)
 ##############################################
 
-DATA_FILE = "construction_timeline.xlsx"
+DB_FILE = "tasks.db"
 
-def load_data(file_path):
-    if not os.path.exists(file_path):
-        st.error(f"File {file_path} not found!")
-        st.stop()
-    df = pd.read_excel(file_path)
-    # Clean column names and convert date columns
-    df.columns = df.columns.str.strip()
-    df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce")
-    df["End Date"] = pd.to_datetime(df["End Date"], errors="coerce")
-    # Ensure key text columns are strings
-    for col in ["Status", "Activity", "Item", "Task", "Room"]:
-        df[col] = df[col].astype(str)
-    # If there is a "Notes" column, force it to string.
-    if "Notes" in df.columns:
-        df["Notes"] = df["Notes"].astype(str)
-    # Add new columns if missing
-    if "Order Status" not in df.columns:
-        df["Order Status"] = "Not Ordered"
-    if "Progress" not in df.columns:
-        df["Progress"] = 0
-    df["Progress"] = pd.to_numeric(df["Progress"], errors="coerce").fillna(0)
+def init_db():
+    """Initialize the SQLite database and create the tasks table if not exists."""
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("""
+      CREATE TABLE IF NOT EXISTS tasks (
+        Activity TEXT,
+        Item TEXT,
+        Task TEXT,
+        Room TEXT,
+        "Start Date" TEXT,
+        "End Date" TEXT,
+        Status TEXT,
+        "Order Status" TEXT,
+        Progress INTEGER,
+        Notes TEXT
+      )
+    """)
+    conn.commit()
+    return conn
+
+def load_data_from_db(conn):
+    """Load tasks from the database into a DataFrame."""
+    df = pd.read_sql_query("SELECT * FROM tasks", conn)
+    if not df.empty:
+        # Convert date strings back to datetime objects
+        df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce")
+        df["End Date"] = pd.to_datetime(df["End Date"], errors="coerce")
     return df
 
-def save_data(df, file_path):
-    try:
-        df.to_excel(file_path, index=False)
-        st.success("Data successfully saved!")
-    except Exception as e:
-        st.error(f"Error saving data: {e}")
+def save_data_to_db(df, conn):
+    """Save the DataFrame to the tasks table in the database (replace the table)."""
+    # Before saving, convert datetime columns to ISO format strings
+    df_copy = df.copy()
+    if "Start Date" in df_copy.columns:
+        df_copy["Start Date"] = df_copy["Start Date"].dt.strftime("%Y-%m-%d")
+    if "End Date" in df_copy.columns:
+        df_copy["End Date"] = df_copy["End Date"].dt.strftime("%Y-%m-%d")
+    df_copy.to_sql("tasks", conn, if_exists="replace", index=False)
 
 ##############################################
-# Gantt Chart Generation (with refined grouping)
+# Gantt Chart Generation (Refined Grouping)
 ##############################################
 
 def create_gantt_chart(df_input):
@@ -57,11 +68,11 @@ def create_gantt_chart(df_input):
     if st.session_state.get("group_by_task", False):
         group_cols.append("Task")
     
-    # Aggregate data: minimum Start Date, maximum End Date, average Progress.
+    # Aggregate data: get min start date, max end date, average progress.
     agg_dict = {"Start Date": "min", "End Date": "max", "Progress": "mean"}
     agg_df = df_input.groupby(group_cols).agg(agg_dict).reset_index()
     
-    # For simplicity, compute an aggregated status:
+    # Compute a simple aggregated status for each group.
     def compute_group_status(row):
         cond = True
         for col in group_cols:
@@ -86,11 +97,9 @@ def create_gantt_chart(df_input):
         seg["End"] = row["End Date"]
         prog = row["Progress"]
         status = row["Aggregated Status"]
-        # Simple logic: if not started or zero progress, mark as "Not Started"
         if status.lower() == "not started" or prog == 0:
             seg["Segment"] = "Not Started"
             seg["Progress"] = "0%"
-        # For in-progress groups with partial progress, split the bar.
         elif status.lower() == "in progress" and 0 < prog < 100:
             total_sec = (row["End Date"] - row["Start Date"]).total_seconds()
             completed_sec = total_sec * (prog / 100.0)
@@ -109,7 +118,6 @@ def create_gantt_chart(df_input):
                 "End": row["End Date"],
                 "Progress": f"{prog:.0f}%"
             }
-        # If finished/delivered, force 100%
         elif status.lower() in ["finished", "delivered"]:
             seg["Segment"] = status
             seg["Progress"] = "100%"
@@ -119,7 +127,7 @@ def create_gantt_chart(df_input):
         segments.append(seg)
     seg_df = pd.DataFrame(segments)
     
-    # Define color mapping.
+    # Define a color mapping.
     color_map = {
         "Not Started": "lightgray",
         "In Progress": "darkblue",
@@ -151,28 +159,30 @@ def create_gantt_chart(df_input):
 st.set_page_config(page_title="Construction Project Manager Dashboard", layout="wide")
 st.title("Construction Project Manager Dashboard")
 
-# Load data only once into session state.
-if "df" not in st.session_state:
-    st.session_state.df = load_data(DATA_FILE)
+# Initialize the SQLite database connection.
+conn = init_db()
 
-# Do NOT reassign st.session_state.df on every run—allow edits to persist.
-# (The data editor below works on a local variable that is only committed when Save Updates is clicked.)
+# Load data from the database into session state only once.
+if "df" not in st.session_state:
+    st.session_state.df = load_data_from_db(conn)
+
+# Do not reassign st.session_state.df on every run—this way edits in the editor persist until saved.
 
 ##############################################
 # Data Editor Section
 ##############################################
 
 st.subheader("Edit Task Information")
-# Display the data editor using the current session state DataFrame.
-# The editor's return value is stored in a local variable.
-editor_value = st.data_editor("Edit Data", st.session_state.df, key="data_editor")
+# Use the data editor to allow updates. (Do not pass an extra label string.)
+editor_value = st.data_editor(st.session_state.df, key="data_editor")
 
-# Provide a Save Updates button. When clicked, commit the changes to session state
-# and save the updated DataFrame to file.
+# Provide a Save Updates button.
 if st.button("Save Updates"):
+    # Save the updated data to session state and to the database.
     st.session_state.df = editor_value.copy()
-    save_data(st.session_state.df, DATA_FILE)
-    st.experimental_rerun()  # Force a rerun so that all downstream components update
+    save_data_to_db(st.session_state.df, conn)
+    st.success("Your changes have been saved.")
+    st.experimental_rerun()  # Force refresh so dashboard components update
 
 ##############################################
 # Sidebar – Filters and Management
@@ -221,7 +231,8 @@ with st.sidebar.expander("Rows"):
             "End Date": pd.NaT,
             "Status": "Not Started",
             "Order Status": "Not Ordered",
-            "Progress": 0
+            "Progress": 0,
+            "Notes": ""
         }
         new_row_df = pd.DataFrame([new_row])
         st.session_state.df = pd.concat([st.session_state.df, new_row_df], ignore_index=True)
@@ -234,7 +245,7 @@ with st.sidebar.expander("Rows"):
             st.sidebar.error("Invalid row number.")
 
 with st.sidebar.expander("Columns"):
-    default_cols = {"Activity", "Item", "Task", "Room", "Start Date", "End Date", "Status", "Order Status", "Progress"}
+    default_cols = {"Activity", "Item", "Task", "Room", "Start Date", "End Date", "Status", "Order Status", "Progress", "Notes"}
     new_col_name = st.sidebar.text_input("New Column Name", key="new_col")
     default_value = st.sidebar.text_input("Default Value", key="def_val")
     if st.sidebar.button("Add Column"):
@@ -248,7 +259,7 @@ with st.sidebar.expander("Columns"):
         st.session_state.df.drop(columns=cols_to_delete, inplace=True)
 
 ##############################################
-# Apply Filters to DataFrame for Dashboard
+# Apply Filters for Dashboard
 ##############################################
 
 df_filtered = st.session_state.df.copy()
@@ -293,7 +304,9 @@ total_tasks = st.session_state.df.shape[0]
 finished_tasks = st.session_state.df[st.session_state.df["Status"].str.strip().str.lower().isin(["finished", "delivered"])].shape[0]
 completion_percentage = (finished_tasks / total_tasks) * 100 if total_tasks > 0 else 0
 in_progress_tasks = st.session_state.df[st.session_state.df["Status"].str.strip().str.lower() == "in progress"].shape[0]
-not_declared = st.session_state.df[~st.session_state.df["Status"].str.strip().str.lower().isin(["finished", "in progress", "delivered", "not started"])].shape[0]
+not_declared = st.session_state.df[~st.session_state.df["Status"].str.strip().str.lower().isin(
+    ["finished", "in progress", "delivered", "not started"]
+)].shape[0]
 
 st.metric("Overall Completion", f"{completion_percentage:.1f}%")
 st.progress(completion_percentage / 100)
