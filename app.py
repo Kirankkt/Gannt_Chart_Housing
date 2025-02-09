@@ -22,7 +22,7 @@ def load_data(file_path):
     # Ensure key text columns are strings
     for col in ["Status", "Activity", "Item", "Task", "Room"]:
         df[col] = df[col].astype(str)
-    # If a "Notes" column exists, force it to string
+    # If there is a "Notes" column, force it to string.
     if "Notes" in df.columns:
         df["Notes"] = df["Notes"].astype(str)
     # Add new columns if missing
@@ -41,14 +41,14 @@ def save_data(df, file_path):
         st.error(f"Error saving data: {e}")
 
 ##############################################
-# Gantt Chart Generation (Refined Grouping)
+# Gantt Chart Generation (with refined grouping)
 ##############################################
 
 def create_gantt_chart(df_input):
     if df_input.empty:
         return px.scatter(title="No data to display")
     
-    # Build grouping columns based on sidebar options.
+    # Build grouping columns based on sidebar checkboxes.
     group_cols = ["Activity"]
     if st.session_state.get("group_by_room", False):
         group_cols.append("Room")
@@ -57,11 +57,11 @@ def create_gantt_chart(df_input):
     if st.session_state.get("group_by_task", False):
         group_cols.append("Task")
     
-    # Aggregate data: minimum Start Date, maximum End Date, and average Progress.
+    # Aggregate data: minimum Start Date, maximum End Date, average Progress.
     agg_dict = {"Start Date": "min", "End Date": "max", "Progress": "mean"}
     agg_df = df_input.groupby(group_cols).agg(agg_dict).reset_index()
     
-    # Compute a simple aggregated status per group.
+    # For simplicity, compute an aggregated status:
     def compute_group_status(row):
         cond = True
         for col in group_cols:
@@ -86,11 +86,11 @@ def create_gantt_chart(df_input):
         seg["End"] = row["End Date"]
         prog = row["Progress"]
         status = row["Aggregated Status"]
-        # If Not Started or zero progress, show as Not Started.
+        # Simple logic: if not started or zero progress, mark as "Not Started"
         if status.lower() == "not started" or prog == 0:
             seg["Segment"] = "Not Started"
             seg["Progress"] = "0%"
-        # If In Progress with partial progress, split the bar.
+        # For in-progress groups with partial progress, split the bar.
         elif status.lower() == "in progress" and 0 < prog < 100:
             total_sec = (row["End Date"] - row["Start Date"]).total_seconds()
             completed_sec = total_sec * (prog / 100.0)
@@ -109,7 +109,7 @@ def create_gantt_chart(df_input):
                 "End": row["End Date"],
                 "Progress": f"{prog:.0f}%"
             }
-        # If Finished or Delivered, force 100%.
+        # If finished/delivered, force 100%
         elif status.lower() in ["finished", "delivered"]:
             seg["Segment"] = status
             seg["Progress"] = "100%"
@@ -151,19 +151,34 @@ def create_gantt_chart(df_input):
 st.set_page_config(page_title="Construction Project Manager Dashboard", layout="wide")
 st.title("Construction Project Manager Dashboard")
 
-# Load data only once.
+# Load data only once into session state.
 if "df" not in st.session_state:
     st.session_state.df = load_data(DATA_FILE)
-    
-# Do NOT reassign or re-sanitize st.session_state.df on every run.
-# (This ensures that user edits persist until saved.)
+
+# Do NOT reassign st.session_state.df on every run—allow edits to persist.
+# (The data editor below works on a local variable that is only committed when Save Updates is clicked.)
+
+##############################################
+# Data Editor Section
+##############################################
+
+st.subheader("Edit Task Information")
+# Display the data editor using the current session state DataFrame.
+# The editor's return value is stored in a local variable.
+editor_value = st.data_editor("Edit Data", st.session_state.df, key="data_editor")
+
+# Provide a Save Updates button. When clicked, commit the changes to session state
+# and save the updated DataFrame to file.
+if st.button("Save Updates"):
+    st.session_state.df = editor_value.copy()
+    save_data(st.session_state.df, DATA_FILE)
+    st.experimental_rerun()  # Force a rerun so that all downstream components update
 
 ##############################################
 # Sidebar – Filters and Management
 ##############################################
 
 st.sidebar.header("Filter Options")
-
 def norm_unique(col):
     return sorted(set(st.session_state.df[col].dropna().astype(str).str.lower().str.strip()))
 
@@ -233,7 +248,7 @@ with st.sidebar.expander("Columns"):
         st.session_state.df.drop(columns=cols_to_delete, inplace=True)
 
 ##############################################
-# Apply Filters to DataFrame
+# Apply Filters to DataFrame for Dashboard
 ##############################################
 
 df_filtered = st.session_state.df.copy()
@@ -257,69 +272,6 @@ if len(selected_dates) == 2:
     end_range = pd.to_datetime(selected_dates[1])
     df_filtered = df_filtered[(df_filtered["Start Date"] >= start_range) & (df_filtered["End Date"] <= end_range)]
 df_filtered.drop(columns=[col for col in df_filtered.columns if col.endswith("_norm")], inplace=True)
-
-##############################################
-# Data Editing Section – With Column Prompts
-##############################################
-
-st.subheader("Update Task Information")
-st.markdown("""
-- For **Activity**, **Item**, **Task**, and **Room** you may select an existing value or type a new one.
-- **Order Status** (dropdown): Choose "Not Ordered" or "Ordered" as appropriate.
-- **Status** (dropdown): Select the overall status.
-- **Progress** (number): Enter a percentage (0–100).
-""")
-column_config = {
-    "Activity": st.column_config.SelectboxColumn(
-         "Activity",
-         options=sorted(st.session_state.df["Activity"].dropna().unique()),
-         help="Select an existing activity or type a new value."
-    ),
-    "Item": st.column_config.SelectboxColumn(
-         "Item",
-         options=sorted(st.session_state.df["Item"].dropna().unique()),
-         help="Select an existing item or type a new value."
-    ),
-    "Task": st.column_config.SelectboxColumn(
-         "Task",
-         options=sorted(st.session_state.df["Task"].dropna().unique()),
-         help="Select an existing task or type a new value."
-    ),
-    "Room": st.column_config.SelectboxColumn(
-         "Room",
-         options=sorted(st.session_state.df["Room"].dropna().unique()),
-         help="Select an existing room or type a new value."
-    ),
-    "Status": st.column_config.SelectboxColumn(
-         "Status",
-         options=["Not Started", "In Progress", "Finished", "Delivered", "Not Delivered"],
-         help="Select the overall status."
-    ),
-    "Order Status": st.column_config.SelectboxColumn(
-         "Order Status",
-         options=["Not Ordered", "Ordered"],
-         help="Select 'Not Ordered' if materials have not been ordered; 'Ordered' if they have been."
-    ),
-    "Progress": st.column_config.NumberColumn(
-         "Progress",
-         help="Enter a percentage (0–100).",
-         min_value=0,
-         max_value=100,
-         step=1
-    )
-}
-
-# Launch the data editor.
-edited_df = st.data_editor("Edit Task Information", st.session_state.df, use_container_width=True)
-st.session_state.df = edited_df  # Update session state with the edited values
-
-##############################################
-# Save Updates Button – Save the Current DataFrame
-##############################################
-
-if st.button("Save Updates"):
-    save_data(st.session_state.df, DATA_FILE)
-    st.success("Your changes have been saved.")
 
 ##############################################
 # Dashboard Overview
