@@ -53,7 +53,7 @@ st.markdown(
     """
     **Instructions:**
     - Update any field below.
-    - For **Activity**, **Item**, **Task**, and **Room** the editor will show a dropdown (with type-ahead suggestions) based on existing values.
+    - For **Activity**, **Item**, **Task**, and **Room** the editor will show a dropdown based on existing values.
     - For **Status**, choose one of: **Finished**, **In Progress**, **Not Started**, **Delivered**, or **Not Delivered**.
     - For **Order Status**, select **Ordered** or **Not Ordered**.
     - For **Progress**, enter the completion percentage (0–100).
@@ -61,31 +61,28 @@ st.markdown(
     """
 )
 
-# Configure column editors (the keys Activity, Item, Task, Room now have dropdowns with suggestions)
+# Configure column editors.
+# Note: The unsupported 'allow_custom' parameter has been removed.
 column_config = {
     "Activity": st.column_config.SelectboxColumn(
          "Activity",
          options=sorted(df["Activity"].dropna().unique()),
-         help="Select an existing activity or type a new one.",
-         allow_custom=True
+         help="Select an existing activity."
     ),
     "Item": st.column_config.SelectboxColumn(
          "Item",
          options=sorted(df["Item"].dropna().unique()),
-         help="Select an existing item or type a new one.",
-         allow_custom=True
+         help="Select an existing item."
     ),
     "Task": st.column_config.SelectboxColumn(
          "Task",
          options=sorted(df["Task"].dropna().unique()),
-         help="Select an existing task or type a new one.",
-         allow_custom=True
+         help="Select an existing task."
     ),
     "Room": st.column_config.SelectboxColumn(
          "Room",
          options=sorted(df["Room"].dropna().unique()),
-         help="Select an existing room or type a new one.",
-         allow_custom=True
+         help="Select an existing room."
     ),
     "Status": st.column_config.SelectboxColumn(
          "Status",
