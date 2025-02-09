@@ -22,7 +22,7 @@ def load_data(file_path):
     # Ensure key text columns are strings
     for col in ["Status", "Activity", "Item", "Task", "Room"]:
         df[col] = df[col].astype(str)
-    # If there is a "Notes" column, force it to string
+    # If there is a "Notes" column, force it to string.
     if "Notes" in df.columns:
         df["Notes"] = df["Notes"].astype(str)
     # Add new columns if missing
@@ -34,10 +34,13 @@ def load_data(file_path):
     return df
 
 def enforce_logic(df):
-    # Enforce our business rules on each row:
-    # 1. If Order Status is "Not Ordered", then Status must be "Not Started" and Progress forced to 0.
-    # 2. If Order Status is "Ordered" but Status is "Not Started", force Progress to 0.
-    # 3. If Status is "Finished" or "Delivered", force Progress to 100.
+    """
+    Enforce the business rules:
+      - If Order Status is "Not Ordered", work cannot begin:
+           * Force Status to "Not Started" and Progress to 0.
+      - If Order Status is "Ordered" but Status is "Not Started", Progress remains 0.
+      - If Status is "Finished" or "Delivered", Progress is forced to 100.
+    """
     for idx, row in df.iterrows():
         order_status = row["Order Status"].strip().lower()
         status = row["Status"].strip().lower()
@@ -45,11 +48,10 @@ def enforce_logic(df):
         if order_status == "not ordered":
             df.at[idx, "Status"] = "Not Started"
             df.at[idx, "Progress"] = 0
-        else:  # order_status is "ordered"
+        else:  # order_status == "ordered"
             if status == "not started":
                 df.at[idx, "Progress"] = 0
             elif status == "in progress":
-                # Allow progress between 1 and 99 (we simply clamp the value between 0 and 100)
                 df.at[idx, "Progress"] = max(0, min(100, progress))
             elif status in ["finished", "delivered"]:
                 df.at[idx, "Progress"] = 100
@@ -72,9 +74,8 @@ def create_gantt_chart(df_input):
     if df_input.empty:
         return px.scatter(title="No data to display")
     
-    # For simplicity, we group by Activity. (You can extend grouping based on sidebar options.)
+    # For simplicity, we group by Activity (you can extend to more grouping as needed)
     group_cols = ["Activity"]
-    # Aggregate data: minimum Start Date, maximum End Date, average Progress.
     agg_dict = {"Start Date": "min", "End Date": "max", "Progress": "mean"}
     agg_df = df_input.groupby(group_cols).agg(agg_dict).reset_index()
     
@@ -103,11 +104,11 @@ def create_gantt_chart(df_input):
         seg["End"] = row["End Date"]
         prog = row["Progress"]
         status = row["Aggregated Status"]
-        # For Not Started tasks (or if progress is 0), show lightgray.
+        # If Not Started or zero progress, show as Not Started.
         if status.lower() == "not started" or prog == 0:
             seg["Segment"] = "Not Started"
             seg["Progress"] = "0%"
-        # For In Progress tasks with partial progress, split the bar.
+        # If In Progress with partial progress, split into two segments.
         elif status.lower() == "in progress" and 0 < prog < 100:
             total_sec = (row["End Date"] - row["Start Date"]).total_seconds()
             completed_sec = total_sec * (prog / 100.0)
@@ -126,7 +127,7 @@ def create_gantt_chart(df_input):
                 "End": row["End Date"],
                 "Progress": f"{prog:.0f}%"
             }
-        # For Finished/Delivered, force 100% and use green.
+        # If Finished or Delivered, force 100%.
         elif status.lower() in ["finished", "delivered"]:
             seg["Segment"] = status
             seg["Progress"] = "100%"
@@ -168,8 +169,16 @@ def create_gantt_chart(df_input):
 st.set_page_config(page_title="Construction Project Manager Dashboard", layout="wide")
 st.title("Construction Project Manager Dashboard")
 
+# Load data into session_state (if not already loaded)
 if "df" not in st.session_state:
     st.session_state.df = load_data(DATA_FILE)
+
+# Before editing, ensure that all object-type columns (e.g. "Notes") are explicitly cast to string.
+df_for_edit = st.session_state.df.copy()
+for col in df_for_edit.columns:
+    if df_for_edit[col].dtype == "object":
+        df_for_edit[col] = df_for_edit[col].astype(str)
+st.session_state.df = df_for_edit
 
 ##############################################
 # Sidebar – Filters and Management
@@ -190,7 +199,6 @@ if st.sidebar.button("Clear Filters"):
     for key in ["filter_activity", "filter_item", "filter_task", "filter_room", "filter_status", "filter_order_status"]:
         st.session_state[key] = []
 
-# Optional grouping options for the Gantt chart.
 st.sidebar.markdown("**Gantt Grouping Options**")
 group_by_room = st.sidebar.checkbox("Group by Room", value=False)
 group_by_item = st.sidebar.checkbox("Group by Item", value=False)
@@ -199,7 +207,6 @@ st.session_state.group_by_room = group_by_room
 st.session_state.group_by_item = group_by_item
 st.session_state.group_by_task = group_by_task
 
-# Date range filter.
 min_date = st.session_state.df["Start Date"].min()
 max_date = st.session_state.df["End Date"].max()
 selected_dates = st.sidebar.date_input("Select Date Range", value=[min_date, max_date])
@@ -279,7 +286,7 @@ df_filtered.drop(columns=[col for col in df_filtered.columns if col.endswith("_n
 st.subheader("Update Task Information")
 st.markdown("""
 - For **Activity**, **Item**, **Task**, and **Room** you may select an existing value or type a new one.
-- **Order Status** (dropdown): Choose “Not Ordered” if materials have not been ordered; if so, then **Status** will be forced to “Not Started” and **Progress** will remain 0.
+- **Order Status** (dropdown): Choose “Not Ordered” if materials have not been ordered; if so, **Status** will be forced to “Not Started” and **Progress** will remain 0.
 - When **Order Status** is “Ordered”, the **Status** dropdown offers all options.
 - **Progress** (number): If **Order Status** is “Not Ordered” or **Status** is “Not Started”, progress will be forced to 0. If **Status** is “In Progress”, you may enter a value between 1 and 99. If **Status** is “Finished” or “Delivered”, progress will be forced to 100.
 """)
@@ -323,8 +330,14 @@ column_config = {
     )
 }
 
-edited_df = st.data_editor(st.session_state.df, use_container_width=True, num_rows=st.session_state.df.shape[0], column_config=column_config)
-st.session_state.df = edited_df
+# Before launching the data editor, make sure our DataFrame is sanitized.
+df_for_editor = st.session_state.df.copy()
+for col in df_for_editor.columns:
+    if df_for_editor[col].dtype == "object":
+        df_for_editor[col] = df_for_editor[col].astype(str)
+
+edited_df = st.data_editor(df_for_editor, use_container_width=True, num_rows=st.session_state.df.shape[0], column_config=column_config)
+st.session_state.df = edited_df  # update session state with the edited version
 
 ##############################################
 # Save Updates Button – Enforce Logic and Save
@@ -362,7 +375,6 @@ not_declared = st.session_state.df[~st.session_state.df["Status"].str.strip().st
 st.metric("Overall Completion", f"{completion_percentage:.1f}%")
 st.progress(completion_percentage / 100)
 
-# 4) Additional Insights
 st.markdown("#### Additional Insights")
 today = pd.Timestamp(datetime.today().date())
 overdue_df = df_filtered[(df_filtered["End Date"] < today) &
