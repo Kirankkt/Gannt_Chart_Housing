@@ -68,17 +68,6 @@ df = load_data(DATA_FILE)
 # 2. Data Editing Section (Allowing New Rows)
 # ---------------------------------------------------
 st.subheader("Update Task Information")
-st.markdown(
-    """
-    **Instructions:**
-    - Update any field below.
-    - For **Activity**, **Item**, **Task**, and **Room**, the editor will show a dropdown based on existing values.
-    - For **Status**, choose one of: **Finished**, **In Progress**, **Not Started**, **Delivered**, or **Not Delivered**.
-    - For **Order Status**, select **Ordered** or **Not Ordered**.
-    - For **Progress**, enter the completion percentage (0–100).
-    - You can add new rows using the editor (the table will grow dynamically).
-    """
-)
 
 # --- Simple row/column management in the sidebar ---
 with st.sidebar.expander("Row & Column Management"):
@@ -137,51 +126,50 @@ with st.sidebar.expander("Row & Column Management"):
             st.sidebar.warning("Please select a valid column.")
 
 # Configure column editors.
-# Note: The 'allow_custom' parameter is not supported, so we leave it out.
 column_config = {}
 if "Activity" in df.columns:
     column_config["Activity"] = st.column_config.SelectboxColumn(
-         "Activity",
-         options=sorted(df["Activity"].dropna().unique()),
-         help="Select an existing activity."
+        "Activity",
+        options=sorted(df["Activity"].dropna().unique()),
+        help="Select an existing activity."
     )
 if "Item" in df.columns:
     column_config["Item"] = st.column_config.SelectboxColumn(
-         "Item",
-         options=sorted(df["Item"].dropna().unique()),
-         help="Select an existing item."
+        "Item",
+        options=sorted(df["Item"].dropna().unique()),
+        help="Select an existing item."
     )
 if "Task" in df.columns:
     column_config["Task"] = st.column_config.SelectboxColumn(
-         "Task",
-         options=sorted(df["Task"].dropna().unique()),
-         help="Select an existing task."
+        "Task",
+        options=sorted(df["Task"].dropna().unique()),
+        help="Select an existing task."
     )
 if "Room" in df.columns:
     column_config["Room"] = st.column_config.SelectboxColumn(
-         "Room",
-         options=sorted(df["Room"].dropna().unique()),
-         help="Select an existing room."
+        "Room",
+        options=sorted(df["Room"].dropna().unique()),
+        help="Select an existing room."
     )
 if "Status" in df.columns:
     column_config["Status"] = st.column_config.SelectboxColumn(
-         "Status",
-         options=["Finished", "In Progress", "Not Started", "Delivered", "Not Delivered"],
-         help="Select the current status of the task."
+        "Status",
+        options=["Finished", "In Progress", "Not Started", "Delivered", "Not Delivered"],
+        help="Select the current status of the task."
     )
 if "Order Status" in df.columns:
     column_config["Order Status"] = st.column_config.SelectboxColumn(
-         "Order Status",
-         options=["Ordered", "Not Ordered"],
-         help="Indicate if the task/material has been ordered."
+        "Order Status",
+        options=["Ordered", "Not Ordered"],
+        help="Indicate if the task/material has been ordered."
     )
 if "Progress" in df.columns:
     column_config["Progress"] = st.column_config.NumberColumn(
-         "Progress",
-         help="Enter the progress percentage (0-100).",
-         min_value=0,
-         max_value=100,
-         step=1
+        "Progress",
+        help="Enter the progress percentage (0-100).",
+        min_value=0,
+        max_value=100,
+        step=1
     )
 
 # Render editable data table
@@ -192,7 +180,7 @@ edited_df = st.data_editor(
     num_rows="dynamic"
 )
 
-# Ensure defaults for new rows
+# Make sure newly-added rows have default status/order/progress
 if "Status" in edited_df.columns:
     edited_df["Status"] = edited_df["Status"].fillna("Not Started").replace("", "Not Started")
 if "Order Status" in edited_df.columns:
@@ -203,12 +191,15 @@ if "Progress" in edited_df.columns:
 # ---------------------------------------------------
 # 2a. Save Updates Button
 # ---------------------------------------------------
+st.markdown(
+    "**Note:** Once you click 'Save Updates', the Excel file is overwritten. "
+    "Make sure you have reviewed your changes, as there's no built-in undo."
+)
 if st.button("Save Updates"):
     try:
         edited_df.to_excel(DATA_FILE, index=False)
         st.success("Data successfully saved!")
         load_data.clear()  # Clear cache so that new data is reloaded
-        # Removed st.experimental_rerun() to avoid the error message
     except Exception as e:
         st.error(f"Error saving data: {e}")
 
@@ -223,7 +214,7 @@ def norm_unique(df_input, col):
         return []
     return sorted(set(df_input[col].dropna().astype(str).str.lower().str.strip()))
 
-# We attach keys to make them resettable via "Clear Filters"
+# Initialize session state for filters
 if "activity_filter" not in st.session_state:
     st.session_state["activity_filter"] = []
 if "item_filter" not in st.session_state:
@@ -237,7 +228,6 @@ if "status_filter" not in st.session_state:
 if "order_filter" not in st.session_state:
     st.session_state["order_filter"] = []
 if "date_range" not in st.session_state:
-    # default to min/max date in data
     min_date = edited_df["Start Date"].min() if "Start Date" in edited_df.columns else datetime.today()
     max_date = edited_df["End Date"].max() if "End Date" in edited_df.columns else datetime.today()
     st.session_state["date_range"] = [min_date, max_date]
@@ -311,13 +301,9 @@ group_by_item = st.sidebar.checkbox("Group by Item", value=False)
 group_by_task = st.sidebar.checkbox("Group by Task", value=False)
 
 # Date range
-if "date_range" in st.session_state and len(st.session_state["date_range"]) == 2:
-    default_min, default_max = st.session_state["date_range"]
-else:
-    default_min = edited_df["Start Date"].min() if "Start Date" in edited_df.columns else datetime.today()
-    default_max = edited_df["End Date"].max() if "End Date" in edited_df.columns else datetime.today()
-
-selected_date_range = st.sidebar.date_input("Select Date Range", 
+default_min, default_max = st.session_state["date_range"]
+selected_date_range = st.sidebar.date_input(
+    "Select Date Range",
     value=[default_min, default_max],
     key="date_range"
 )
@@ -365,7 +351,7 @@ if len(selected_date_range) == 2:
 
 # Drop the temp normalized columns
 to_drop_norm = [c for c in df_filtered.columns if c.endswith("_norm")]
-df_filtered.drop(columns=to_drop_norm, inplace=True)
+df_filtered.drop(columns=to_drop_norm, inplace=True, errors="ignore")
 
 # ---------------------------------------------------
 # 5. Revised Gantt Chart Generation with Enhanced Color Logic
@@ -375,19 +361,10 @@ def create_gantt_chart(df_input, color_by_status=False):
     Create a Gantt chart from df_input, aggregating by selected grouping columns.
     - If df_input is empty, return an empty figure (no error).
     - Aggregates (min Start, max End, mean Progress) by group.
-    - Derives an 'Aggregated Status' for color coding:
-        * Delayed = if End Date < now and Progress < 100
-        * Finished = if Progress == 100 or all statuses are finished/delivered
-        * In Progress = otherwise, if we have partial completion
-        * Not Started / Delivered / Not Delivered = lumps these into light gray
-    - For 'In Progress', partial bar is dark blue (completed), remainder is light gray.
-    - For 'Delayed', entire bar is red.
-    - For 'Finished', entire bar is green.
-    - For 'Not Started/Delivered/Not Delivered', entire bar is light gray.
+    - Derives an 'Aggregated Status' for color coding.
     """
 
     if df_input.empty:
-        # Return a simple empty figure
         return px.scatter(title="No data to display for Gantt")
 
     # Build grouping columns dynamically
@@ -400,7 +377,6 @@ def create_gantt_chart(df_input, color_by_status=False):
         group_cols.append("Task")
 
     if not group_cols:
-        # If no grouping is selected, just show a minimal plot or message
         return px.scatter(title="No group columns selected.")
 
     # Aggregate
@@ -418,14 +394,15 @@ def create_gantt_chart(df_input, color_by_status=False):
 
     # Determine an aggregated status for each group
     now = pd.Timestamp(datetime.today().date())
+
     def get_aggregated_status(subset_df, avg_progress, end_date):
-        # If all tasks are finished or delivered => "Finished"
-        # If end_date < now and progress < 100 => "Delayed"
-        # If any tasks in progress => "In Progress"
-        # Else => "Not Started / Delivered / Not Delivered"
+        # Only "finished" → "Finished" (green)
+        # end_date < now and progress < 100 → "Delayed" (red)
+        # any "in progress" → "In Progress" (splitting bar)
+        # else → "Not Started / Delivered / Not Delivered" (gray)
         statuses = subset_df["Status"].str.strip().str.lower()
-        # All statuses are finished/delivered?
-        all_finished = all(s in ["finished", "delivered"] for s in statuses)
+        # all tasks are strictly "finished"?
+        all_finished = all(s == "finished" for s in statuses)
 
         if all_finished or avg_progress >= 100:
             return "Finished"
@@ -433,10 +410,9 @@ def create_gantt_chart(df_input, color_by_status=False):
             return "Delayed"
         if "in progress" in statuses.values:
             return "In Progress"
-        # Otherwise lump not started / delivered / not delivered
         return "Not Started / Delivered / Not Delivered"
 
-    # We need to figure out each group subset quickly
+    # Build timeline segments
     gantt_segments = []
     for idx, row in grouped.iterrows():
         # Subset the original DF to see if any tasks are "in progress", etc.
@@ -446,7 +422,7 @@ def create_gantt_chart(df_input, color_by_status=False):
         subset = df_input[cond]
 
         group_status = get_aggregated_status(
-            subset_df=subset, 
+            subset_df=subset,
             avg_progress=row["AvgProgress"],
             end_date=row["GroupEnd"]
         )
@@ -455,13 +431,12 @@ def create_gantt_chart(df_input, color_by_status=False):
         end = row["GroupEnd"]
         avg_prog = row["AvgProgress"]
 
-        # Build timeline segments
         if group_status == "In Progress" and 0 < avg_prog < 100:
             total_duration = (end - start).total_seconds()
             completed_duration = total_duration * (avg_prog / 100.0)
             completed_end = start + pd.Timedelta(seconds=completed_duration)
 
-            # Segment 1: Completed portion (darkblue)
+            # Segment 1: Completed portion (darkblue), show e.g. "7%"
             gantt_segments.append({
                 "Group Label": group_label,
                 "Start": start,
@@ -469,16 +444,18 @@ def create_gantt_chart(df_input, color_by_status=False):
                 "Display Status": "In Progress (Completed part)",
                 "Progress": f"{avg_prog:.0f}%"
             })
-            # Segment 2: Remaining portion (lightgray)
+
+            # Segment 2: Remaining portion (lightgray), e.g. "93%"
+            remain_pct = 100 - avg_prog
             gantt_segments.append({
                 "Group Label": group_label,
                 "Start": completed_end,
                 "End": end,
                 "Display Status": "In Progress (Remaining part)",
-                "Progress": f"{avg_prog:.0f}%"
+                "Progress": f"{remain_pct:.0f}%"
             })
         else:
-            # Single segment for Finished, Delayed, Not Started, etc.
+            # Single segment for Finished, Delayed, Not Started, Delivered, etc.
             gantt_segments.append({
                 "Group Label": group_label,
                 "Start": start,
@@ -521,7 +498,7 @@ gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status)
 # ---------------------------------------------------
 total_tasks = edited_df.shape[0]
 finished_tasks = edited_df[
-    edited_df["Status"].str.strip().str.lower().isin(["finished", "delivered"])
+    edited_df["Status"].str.strip().str.lower() == "finished"
 ].shape[0]
 completion_percentage = (finished_tasks / total_tasks) * 100 if total_tasks > 0 else 0
 
@@ -530,13 +507,15 @@ tasks_in_progress = edited_df[
 ].shape[0]
 
 not_declared = edited_df[
-    ~edited_df["Status"].str.strip().str.lower().isin(["finished", "in progress", "delivered", "not started"])
+    ~edited_df["Status"].str.strip().str.lower().isin(
+        ["finished", "in progress", "delivered", "not started"]
+    )
 ].shape[0]
 
 today = pd.Timestamp(datetime.today().date())
 overdue_df = df_filtered[
     (df_filtered["End Date"] < today)
-    & (~df_filtered["Status"].str.strip().str.lower().isin(["finished", "delivered"]))
+    & (~df_filtered["Status"].str.strip().str.lower().isin(["finished"]))
 ]
 overdue_count = overdue_df.shape[0]
 
@@ -610,7 +589,7 @@ st.write(filter_summary_text)
 col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
 col_kpi1.metric("Total Tasks", total_tasks)
 col_kpi2.metric("In Progress", tasks_in_progress)
-col_kpi3.metric("Finished/Delivered", finished_tasks)
+col_kpi3.metric("Finished", finished_tasks)
 col_kpi4.metric("Not Declared", not_declared)
 
 st.markdown("Use the filters on the sidebar to adjust the view.")
