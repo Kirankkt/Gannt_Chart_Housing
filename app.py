@@ -1,12 +1,14 @@
 import streamlit as st
+
+# This must be the first Streamlit command in your script.
+st.set_page_config(page_title="Construction Project Manager Dashboard", layout="wide")
+
+# Now import everything else.
 import pandas as pd
 import plotly.express as px
 import io, os
 from datetime import datetime
 from docx import Document
-
-# Set page configuration as the very first Streamlit command!
-st.set_page_config(page_title="Construction Project Manager Dashboard", layout="wide")
 
 # Now you can add your custom CSS and other Streamlit commands
 st.markdown(
