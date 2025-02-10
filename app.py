@@ -5,9 +5,10 @@ import io, os
 from datetime import datetime
 from docx import Document
 
-# ---------------------------------------------------
-# Custom CSS to hide the tooltip on the extra (ghost) row
-# ---------------------------------------------------
+# Set page configuration as the very first Streamlit command!
+st.set_page_config(page_title="Construction Project Manager Dashboard", layout="wide")
+
+# Now you can add your custom CSS and other Streamlit commands
 st.markdown(
     """
     <style>
@@ -18,6 +19,8 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
+# ... rest of your code ...
 
 # ---------------------------------------------------
 # App Configuration
