@@ -166,7 +166,7 @@ if "Progress" in df_main.columns:
         "Progress", min_value=0, max_value=100, step=1, help="Progress %"
     )
 
-# Edit the main timeline with the data editor
+# Edit the main timeline using the data editor
 edited_df_main = st.data_editor(
     df_main,
     column_config=column_config_main,
@@ -179,18 +179,18 @@ if "Status" in edited_df_main.columns:
     edited_df_main["Status"] = edited_df_main["Status"].astype(str).fillna("Not Started")
 
 # --- Auto-update Progress when Status is Finished ---
-# If any row’s Status is set to Finished, automatically update Progress to 100.
 if "Status" in edited_df_main.columns and "Progress" in edited_df_main.columns:
     mask_finished = edited_df_main["Status"].str.lower() == "finished"
-    # Check if any finished task has Progress not equal to 100.
     if mask_finished.any() and not edited_df_main.loc[mask_finished, "Progress"].eq(100).all():
         edited_df_main.loc[mask_finished, "Progress"] = 100
-        # Force a rerun so the updated table and Gantt chart are reflected.
-        st.experimental_rerun()
+        try:
+            # Try to force a rerun so the updated table and Gantt chart are reflected.
+            st.experimental_rerun()
+        except AttributeError:
+            st.warning("st.experimental_rerun() is not available in your Streamlit version. Please consider upgrading Streamlit to enable auto refresh.")
 
 # Save Updates button (when clicked, the data is saved to Excel)
 if st.button("Save Updates (Main Timeline)"):
-    # Before saving, enforce the auto-update one more time.
     edited_df_main.loc[edited_df_main["Status"].str.lower() == "finished", "Progress"] = 100
     try:
         edited_df_main.to_excel(DATA_FILE, index=False)
