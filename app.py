@@ -29,7 +29,7 @@ hide_stdataeditor_bug_tooltip = """
 st.markdown(hide_stdataeditor_bug_tooltip, unsafe_allow_html=True)
 
 # ---------------------------------------------------
-# 1. Data Loading from Excel
+# 1. Data Loading from Excel (Main Timeline)
 # ---------------------------------------------------
 @st.cache_data
 def load_data(file_path):
@@ -595,3 +595,67 @@ col_kpi4.metric("Not Declared", not_declared)
 st.markdown("Use the filters on the sidebar to adjust the view.")
 st.markdown("---")
 st.markdown("CMBP Analytics Dashboard")
+
+# ---------------------------------------------------
+# 8. SECOND TABLE: Items to Order
+# ---------------------------------------------------
+
+ITEMS_FILE = "items_to_order.xlsx"
+
+@st.cache_data
+def load_items_data(file_path):
+    """Load or create the 'Items to Order' table."""
+    if os.path.exists(file_path):
+        df_items = pd.read_excel(file_path)
+    else:
+        # Return an empty DF with default columns if file not found
+        df_items = pd.DataFrame(columns=["Item", "Quantity", "Order Status", "Needed By", "Notes"])
+    return df_items
+
+st.subheader("Items to Order")
+
+# Load or create
+df_items = load_items_data(ITEMS_FILE)
+
+# Optional column config for the items table
+items_column_config = {}
+if "Order Status" in df_items.columns:
+    items_column_config["Order Status"] = st.column_config.SelectboxColumn(
+        "Order Status",
+        options=["To Order", "Ordered", "Received", "Cancelled"],
+        help="Choose the current ordering state."
+    )
+if "Quantity" in df_items.columns:
+    items_column_config["Quantity"] = st.column_config.NumberColumn(
+        "Quantity",
+        min_value=0,
+        step=1
+    )
+
+# Editable data table for Items to Order
+edited_df_items = st.data_editor(
+    df_items,
+    column_config=items_column_config,
+    use_container_width=True,
+    num_rows="dynamic"
+)
+
+# Save button for items table
+if st.button("Save Items Table"):
+    try:
+        edited_df_items.to_excel(ITEMS_FILE, index=False)
+        st.success("Items table successfully saved!")
+        load_items_data.clear()
+    except Exception as e:
+        st.error(f"Error saving items table: {e}")
+
+# Optionally add a "Download CSV" button for items
+import io
+csv_buffer = io.StringIO()
+edited_df_items.to_csv(csv_buffer, index=False)
+st.download_button(
+    label="Download Items Table as CSV",
+    data=csv_buffer.getvalue(),
+    file_name="items_to_order.csv",
+    mime="text/csv"
+)
