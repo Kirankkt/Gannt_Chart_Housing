@@ -34,7 +34,7 @@ st.markdown(hide_stdataeditor_bug_tooltip, unsafe_allow_html=True)
 @st.cache_data
 def load_data(file_path):
     if not os.path.exists(file_path):
-        st.error(f"File {file_path} not found!")
+        st.error(f"File '{file_path}' not found!")
         st.stop()
     df = pd.read_excel(file_path)
     # Clean column names
@@ -44,20 +44,18 @@ def load_data(file_path):
         df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce")
     if "End Date" in df.columns:
         df["End Date"] = pd.to_datetime(df["End Date"], errors="coerce")
+    # Convert "Progress" to numeric if present
+    if "Progress" in df.columns:
+        df["Progress"] = pd.to_numeric(df["Progress"], errors="coerce").fillna(0)
 
-    # Ensure string columns
-    for col in ["Status", "Activity", "Item", "Task", "Room"]:
+    # We only keep "Status" in the main table; drop "Order Status" if it exists
+    if "Order Status" in df.columns:
+        df.drop(columns=["Order Status"], inplace=True)
+
+    # Make sure key string columns exist
+    for col in ["Activity", "Item", "Task", "Room", "Status"]:
         if col in df.columns:
             df[col] = df[col].astype(str)
-
-    # Ensure these columns exist
-    if "Order Status" not in df.columns:
-        df["Order Status"] = "Not Ordered"
-    if "Progress" not in df.columns:
-        df["Progress"] = 0
-
-    # Convert Progress to numeric safely
-    df["Progress"] = pd.to_numeric(df["Progress"], errors="coerce").fillna(0)
 
     return df
 
@@ -125,7 +123,7 @@ with st.sidebar.expander("Row & Column Management"):
         else:
             st.sidebar.warning("Please select a valid column.")
 
-# Configure column editors.
+# Configure column editors for main table
 column_config = {}
 if "Activity" in df.columns:
     column_config["Activity"] = st.column_config.SelectboxColumn(
@@ -157,12 +155,6 @@ if "Status" in df.columns:
         options=["Finished", "In Progress", "Not Started", "Delivered", "Not Delivered"],
         help="Select the current status of the task."
     )
-if "Order Status" in df.columns:
-    column_config["Order Status"] = st.column_config.SelectboxColumn(
-        "Order Status",
-        options=["Ordered", "Not Ordered"],
-        help="Indicate if the task/material has been ordered."
-    )
 if "Progress" in df.columns:
     column_config["Progress"] = st.column_config.NumberColumn(
         "Progress",
@@ -172,7 +164,7 @@ if "Progress" in df.columns:
         step=1
     )
 
-# Render editable data table
+# Render editable data table for main timeline
 edited_df = st.data_editor(
     df,
     column_config=column_config,
@@ -180,17 +172,13 @@ edited_df = st.data_editor(
     num_rows="dynamic"
 )
 
-# Make sure newly-added rows have default status/order/progress
+# Make sure newly-added rows have default statuses, etc.
 if "Status" in edited_df.columns:
     edited_df["Status"] = edited_df["Status"].fillna("Not Started").replace("", "Not Started")
-if "Order Status" in edited_df.columns:
-    edited_df["Order Status"] = edited_df["Order Status"].fillna("Not Ordered").replace("", "Not Ordered")
 if "Progress" in edited_df.columns:
     edited_df["Progress"] = pd.to_numeric(edited_df["Progress"], errors="coerce").fillna(0)
 
-# ---------------------------------------------------
-# 2a. Save Updates Button
-# ---------------------------------------------------
+# Save Updates for main timeline
 st.markdown(
     "**Note:** Once you click 'Save Updates', the Excel file is overwritten. "
     "Make sure you have reviewed your changes, as there's no built-in undo."
@@ -225,21 +213,18 @@ if "room_filter" not in st.session_state:
     st.session_state["room_filter"] = []
 if "status_filter" not in st.session_state:
     st.session_state["status_filter"] = []
-if "order_filter" not in st.session_state:
-    st.session_state["order_filter"] = []
 if "date_range" not in st.session_state:
     min_date = edited_df["Start Date"].min() if "Start Date" in edited_df.columns else datetime.today()
     max_date = edited_df["End Date"].max() if "End Date" in edited_df.columns else datetime.today()
     st.session_state["date_range"] = [min_date, max_date]
 
-# Clear filters button
+# Clear filters
 if st.sidebar.button("Clear Filters"):
     st.session_state["activity_filter"] = []
     st.session_state["item_filter"] = []
     st.session_state["task_filter"] = []
     st.session_state["room_filter"] = []
     st.session_state["status_filter"] = []
-    st.session_state["order_filter"] = []
     min_date = edited_df["Start Date"].min() if "Start Date" in edited_df.columns else datetime.today()
     max_date = edited_df["End Date"].max() if "End Date" in edited_df.columns else datetime.today()
     st.session_state["date_range"] = [min_date, max_date]
@@ -284,14 +269,6 @@ selected_statuses = st.sidebar.multiselect(
     key="status_filter"
 )
 
-order_status_options = norm_unique(edited_df, "Order Status")
-selected_order_status = st.sidebar.multiselect(
-    "Select Order Status (leave empty for all)",
-    options=order_status_options,
-    default=st.session_state["order_filter"],
-    key="order_filter"
-)
-
 show_finished = st.sidebar.checkbox("Show Finished/Delivered Tasks", value=True)
 color_by_status = st.sidebar.checkbox("Color-code Gantt Chart by Status", value=True)
 
@@ -314,13 +291,13 @@ selected_date_range = st.sidebar.date_input(
 df_filtered = edited_df.copy()
 
 # Only proceed if the necessary columns exist
-necessary_cols = {"Start Date", "End Date", "Status", "Order Status", "Progress"}
+necessary_cols = {"Start Date", "End Date", "Status", "Progress"}
 if not necessary_cols.issubset(df_filtered.columns):
-    st.warning("Your data is missing some necessary columns for the Gantt chart. Please ensure it has Start Date, End Date, Status, Order Status, Progress, etc.")
+    st.warning("Your data is missing some necessary columns for the Gantt chart (Start Date, End Date, Status, Progress).")
     st.stop()
 
 # Create normalized columns for filtering
-for col in ["Activity", "Item", "Task", "Room", "Status", "Order Status"]:
+for col in ["Activity", "Item", "Task", "Room", "Status"]:
     if col in df_filtered.columns:
         df_filtered[col + "_norm"] = df_filtered[col].astype(str).str.lower().str.strip()
 
@@ -334,8 +311,6 @@ if selected_room_norm:
     df_filtered = df_filtered[df_filtered["Room_norm"].isin(selected_room_norm)]
 if selected_statuses:
     df_filtered = df_filtered[df_filtered["Status_norm"].isin(selected_statuses)]
-if selected_order_status:
-    df_filtered = df_filtered[df_filtered["Order Status_norm"].isin(selected_order_status)]
 if not show_finished:
     # Exclude tasks with status in ["finished", "delivered"]
     df_filtered = df_filtered[~df_filtered["Status_norm"].isin(["finished", "delivered"])]
@@ -354,7 +329,7 @@ to_drop_norm = [c for c in df_filtered.columns if c.endswith("_norm")]
 df_filtered.drop(columns=to_drop_norm, inplace=True, errors="ignore")
 
 # ---------------------------------------------------
-# 5. Revised Gantt Chart Generation with Enhanced Color Logic
+# 5. Revised Gantt Chart Generation
 # ---------------------------------------------------
 def create_gantt_chart(df_input, color_by_status=False):
     """
@@ -379,7 +354,6 @@ def create_gantt_chart(df_input, color_by_status=False):
     if not group_cols:
         return px.scatter(title="No group columns selected.")
 
-    # Aggregate
     agg_dict = {
         "Start Date": "min",
         "End Date": "max",
@@ -387,21 +361,19 @@ def create_gantt_chart(df_input, color_by_status=False):
     }
     grouped = df_input.groupby(group_cols, dropna=False).agg(agg_dict).reset_index()
     grouped.rename(columns={
-        "Start Date":"GroupStart",
-        "End Date":"GroupEnd",
-        "Progress":"AvgProgress"
+        "Start Date": "GroupStart",
+        "End Date": "GroupEnd",
+        "Progress": "AvgProgress"
     }, inplace=True)
 
-    # Determine an aggregated status for each group
     now = pd.Timestamp(datetime.today().date())
 
     def get_aggregated_status(subset_df, avg_progress, end_date):
         # Only "finished" → "Finished" (green)
         # end_date < now and progress < 100 → "Delayed" (red)
-        # any "in progress" → "In Progress" (splitting bar)
+        # any "in progress" → "In Progress" (split bar)
         # else → "Not Started / Delivered / Not Delivered" (gray)
         statuses = subset_df["Status"].str.strip().str.lower()
-        # all tasks are strictly "finished"?
         all_finished = all(s == "finished" for s in statuses)
 
         if all_finished or avg_progress >= 100:
@@ -412,10 +384,9 @@ def create_gantt_chart(df_input, color_by_status=False):
             return "In Progress"
         return "Not Started / Delivered / Not Delivered"
 
-    # Build timeline segments
+    # Build the Gantt segments
     gantt_segments = []
     for idx, row in grouped.iterrows():
-        # Subset the original DF to see if any tasks are "in progress", etc.
         cond = True
         for gcol in group_cols:
             cond &= (df_input[gcol] == row[gcol])
@@ -436,7 +407,7 @@ def create_gantt_chart(df_input, color_by_status=False):
             completed_duration = total_duration * (avg_prog / 100.0)
             completed_end = start + pd.Timedelta(seconds=completed_duration)
 
-            # Segment 1: Completed portion (darkblue), show e.g. "7%"
+            # Completed part (darkblue)
             gantt_segments.append({
                 "Group Label": group_label,
                 "Start": start,
@@ -444,8 +415,7 @@ def create_gantt_chart(df_input, color_by_status=False):
                 "Display Status": "In Progress (Completed part)",
                 "Progress": f"{avg_prog:.0f}%"
             })
-
-            # Segment 2: Remaining portion (lightgray), e.g. "93%"
+            # Remaining part (lightgray)
             remain_pct = 100 - avg_prog
             gantt_segments.append({
                 "Group Label": group_label,
@@ -455,7 +425,6 @@ def create_gantt_chart(df_input, color_by_status=False):
                 "Progress": f"{remain_pct:.0f}%"
             })
         else:
-            # Single segment for Finished, Delayed, Not Started, Delivered, etc.
             gantt_segments.append({
                 "Group Label": group_label,
                 "Start": start,
@@ -468,7 +437,6 @@ def create_gantt_chart(df_input, color_by_status=False):
     if gantt_df.empty:
         return px.scatter(title="No data after grouping.")
 
-    # Define final color mapping
     color_map = {
         "Not Started / Delivered / Not Delivered": "lightgray",
         "In Progress (Completed part)": "darkblue",
@@ -488,7 +456,6 @@ def create_gantt_chart(df_input, color_by_status=False):
     )
     fig.update_yaxes(autorange="reversed")
     fig.update_layout(xaxis_title="Timeline", showlegend=True)
-
     return fig
 
 gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status)
@@ -497,15 +464,10 @@ gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status)
 # 6. Overall Completion & Progress Calculation
 # ---------------------------------------------------
 total_tasks = edited_df.shape[0]
-finished_tasks = edited_df[
-    edited_df["Status"].str.strip().str.lower() == "finished"
-].shape[0]
-completion_percentage = (finished_tasks / total_tasks) * 100 if total_tasks > 0 else 0
+finished_tasks = edited_df[edited_df["Status"].str.strip().str.lower() == "finished"].shape[0]
+completion_percentage = (finished_tasks / total_tasks * 100) if total_tasks > 0 else 0
 
-tasks_in_progress = edited_df[
-    edited_df["Status"].str.strip().str.lower() == "in progress"
-].shape[0]
-
+tasks_in_progress = edited_df[edited_df["Status"].str.strip().str.lower() == "in progress"].shape[0]
 not_declared = edited_df[
     ~edited_df["Status"].str.strip().str.lower().isin(
         ["finished", "in progress", "delivered", "not started"]
@@ -528,10 +490,13 @@ else:
 # Next 7 days
 upcoming_start = today
 upcoming_end = today + pd.Timedelta(days=7)
-upcoming_df = df_filtered[
-    (df_filtered["Start Date"] >= upcoming_start)
-    & (df_filtered["Start Date"] <= upcoming_end)
-] if "Start Date" in df_filtered.columns else pd.DataFrame()
+if "Start Date" in df_filtered.columns:
+    upcoming_df = df_filtered[
+        (df_filtered["Start Date"] >= upcoming_start) &
+        (df_filtered["Start Date"] <= upcoming_end)
+    ]
+else:
+    upcoming_df = pd.DataFrame()
 
 # Build filter summary text
 filter_summary = []
@@ -545,8 +510,6 @@ if selected_room_norm:
     filter_summary.append("Rooms: " + ", ".join([s.title() for s in selected_room_norm]))
 if selected_statuses:
     filter_summary.append("Status: " + ", ".join(selected_statuses))
-if selected_order_status:
-    filter_summary.append("Order Status: " + ", ".join(selected_order_status))
 if len(selected_date_range) == 2:
     filter_summary.append(f"Date Range: {selected_date_range[0]} to {selected_date_range[1]}")
 
@@ -557,29 +520,30 @@ filter_summary_text = "; ".join(filter_summary) if filter_summary else "No filte
 # ---------------------------------------------------
 st.header("Dashboard Overview")
 
-# 1) Current Tasks Snapshot
+# Current Tasks Snapshot
 st.subheader("Current Tasks Snapshot")
 st.dataframe(df_filtered)
 
-# 2) Gantt Chart
+# Gantt Chart
 st.subheader("Project Timeline")
 st.plotly_chart(gantt_fig, use_container_width=True)
 
-# 3) KPI & Progress
+# KPI & Progress
 st.metric("Overall Completion", f"{completion_percentage:.1f}%")
 st.progress(completion_percentage / 100)
 
-# 4) Additional Insights
+# Additional Insights
 st.markdown("#### Additional Insights")
 st.markdown(f"**Overdue Tasks:** {overdue_count}")
 if not overdue_df.empty:
-    st.dataframe(overdue_df[["Activity", "Room", "Task", "Status", "Order Status", "End Date"]])
+    st.dataframe(overdue_df[["Activity", "Room", "Task", "Status", "End Date"]])
+
 st.markdown("**Task Distribution by Activity:**")
 st.plotly_chart(dist_fig, use_container_width=True)
 
 st.markdown("**Upcoming Tasks (Next 7 Days):**")
 if not upcoming_df.empty:
-    st.dataframe(upcoming_df[["Activity", "Room", "Task", "Start Date", "Status", "Order Status"]])
+    st.dataframe(upcoming_df[["Activity", "Room", "Task", "Start Date", "Status"]])
 else:
     st.info("No upcoming tasks in the next 7 days.")
 
@@ -598,41 +562,48 @@ st.markdown("CMBP Analytics Dashboard")
 
 # ---------------------------------------------------
 # 8. SECOND TABLE: Items to Order
+#    from 'Cleaned_Items_Table.csv'
 # ---------------------------------------------------
-
-ITEMS_FILE = "items_to_order.xlsx"
-
 @st.cache_data
 def load_items_data(file_path):
-    """Load or create the 'Items to Order' table."""
+    """Load or create the 'Items to Order' table from CSV."""
     if os.path.exists(file_path):
-        df_items = pd.read_excel(file_path)
+        df_items = pd.read_csv(file_path)
     else:
-        # Return an empty DF with default columns if file not found
-        df_items = pd.DataFrame(columns=["Item", "Quantity", "Order Status", "Needed By", "Notes"])
+        df_items = pd.DataFrame(columns=["Item", "Quantity", "Order Status", "Delivery Status", "Notes"])
     return df_items
 
-st.subheader("Items to Order")
+ITEMS_FILE = "Cleaned_Items_Table.csv"
 
-# Load or create
+st.subheader("Items to Order")
 df_items = load_items_data(ITEMS_FILE)
 
-# Optional column config for the items table
+# Optional column config for Items table
 items_column_config = {}
+
 if "Order Status" in df_items.columns:
     items_column_config["Order Status"] = st.column_config.SelectboxColumn(
         "Order Status",
-        options=["To Order", "Ordered", "Received", "Cancelled"],
-        help="Choose the current ordering state."
+        options=["Ordered", "Not Ordered"],
+        help="Select the current order status."
     )
+
+if "Delivery Status" in df_items.columns:
+    items_column_config["Delivery Status"] = st.column_config.SelectboxColumn(
+        "Delivery Status",
+        options=["Delivered", "Not Delivered"],
+        help="Select the current delivery status."
+    )
+
 if "Quantity" in df_items.columns:
     items_column_config["Quantity"] = st.column_config.NumberColumn(
         "Quantity",
         min_value=0,
-        step=1
+        step=1,
+        help="Enter the required quantity."
     )
 
-# Editable data table for Items to Order
+# Render the Items to Order data editor
 edited_df_items = st.data_editor(
     df_items,
     column_config=items_column_config,
@@ -640,22 +611,21 @@ edited_df_items = st.data_editor(
     num_rows="dynamic"
 )
 
-# Save button for items table
+# Button to save the items table
 if st.button("Save Items Table"):
     try:
-        edited_df_items.to_excel(ITEMS_FILE, index=False)
-        st.success("Items table successfully saved!")
+        edited_df_items.to_csv(ITEMS_FILE, index=False)
+        st.success("Items table successfully saved to Cleaned_Items_Table.csv!")
         load_items_data.clear()
     except Exception as e:
         st.error(f"Error saving items table: {e}")
 
-# Optionally add a "Download CSV" button for items
-import io
+# Optional: Download the Items table as CSV
 csv_buffer = io.StringIO()
 edited_df_items.to_csv(csv_buffer, index=False)
 st.download_button(
     label="Download Items Table as CSV",
     data=csv_buffer.getvalue(),
-    file_name="items_to_order.csv",
+    file_name="Cleaned_Items_Table.csv",
     mime="text/csv"
 )
