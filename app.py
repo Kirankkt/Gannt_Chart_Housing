@@ -64,6 +64,7 @@ def load_timeline_data(file_path: str) -> pd.DataFrame:
     # Type‐check: "Status" must be string
     df["Status"] = df["Status"].astype(str).fillna("Not Started")
 
+    # Optionally convert other columns if needed (e.g. "Activity", "Room" → string)
     return df
 
 DATA_FILE = "construction_timeline.xlsx"
@@ -99,17 +100,16 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
     new_col_type = st.selectbox("Column Type (main table)", ["string", "integer", "float", "datetime"])
     if st.button("Add Column (Main)"):
         if new_col_name and new_col_name not in df_main.columns:
+            # For a "string" type, initialize with an empty string and force object dtype.
             if new_col_type == "string":
-                # Create column of empty strings (makes them text-editable)
-                df_main[new_col_name] = ["" for _ in range(len(df_main))]
-                df_main[new_col_name] = df_main[new_col_name].astype(str)
+                df_main[new_col_name] = ""
+                df_main[new_col_name] = df_main[new_col_name].astype(object)
             elif new_col_type == "integer":
                 df_main[new_col_name] = 0
             elif new_col_type == "float":
                 df_main[new_col_name] = 0.0
             elif new_col_type == "datetime":
                 df_main[new_col_name] = pd.NaT
-
             try:
                 df_main.to_excel(DATA_FILE, index=False)
                 st.sidebar.success(f"Column '{new_col_name}' added and saved.")
@@ -143,8 +143,6 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
 
 # Configure columns for st.data_editor in the main timeline
 column_config_main = {}
-
-# Pre‐set known columns as selectboxes, etc.
 if "Activity" in df_main.columns:
     column_config_main["Activity"] = st.column_config.SelectboxColumn(
         "Activity", options=sorted(df_main["Activity"].dropna().unique()), help="Activity"
@@ -170,27 +168,6 @@ if "Progress" in df_main.columns:
         "Progress", min_value=0, max_value=100, step=1, help="Progress %"
     )
 
-# Any other columns not in the known config get a default config based on dtype:
-for col in df_main.columns:
-    if col not in column_config_main:  # not yet configured
-        col_dtype = df_main[col].dtype
-        if pd.api.types.is_datetime64_any_dtype(col_dtype):
-            column_config_main[col] = st.column_config.DateColumn(
-                label=col,
-                help=f"Date column: {col}"
-            )
-        elif pd.api.types.is_numeric_dtype(col_dtype):
-            column_config_main[col] = st.column_config.NumberColumn(
-                label=col,
-                help=f"Numeric column: {col}"
-            )
-        else:
-            # default to free‐text
-            column_config_main[col] = st.column_config.TextColumn(
-                label=col,
-                help=f"Text column: {col}"
-            )
-
 # Edit the main timeline
 edited_df_main = st.data_editor(
     df_main,
@@ -199,24 +176,14 @@ edited_df_main = st.data_editor(
     num_rows="dynamic"
 )
 
-# Force Status to string once user is done editing
+# Force "Status" to string once user is done editing
 if "Status" in edited_df_main.columns:
     edited_df_main["Status"] = edited_df_main["Status"].astype(str).fillna("Not Started")
 
-# ---------------------------------------------------------------------
-# Immediately set progress = 100 if status = Finished (in memory)
-# So that Gantt chart and metrics update automatically
-# ---------------------------------------------------------------------
-if "Status" in edited_df_main.columns and "Progress" in edited_df_main.columns:
-    mask_finished = edited_df_main["Status"].str.lower() == "finished"
-    edited_df_main.loc[mask_finished, "Progress"] = 100
-
+# --- Auto-update Progress when Status is Finished ---
 if st.button("Save Updates (Main Timeline)"):
-    # Repeat the same logic at save just to ensure consistency
-    if "Status" in edited_df_main.columns and "Progress" in edited_df_main.columns:
-        mask_finished = edited_df_main["Status"].str.lower() == "finished"
-        edited_df_main.loc[mask_finished, "Progress"] = 100
-
+    # If Status is "Finished", update Progress to 100.
+    edited_df_main.loc[edited_df_main["Status"].str.lower() == "finished", "Progress"] = 100
     try:
         edited_df_main.to_excel(DATA_FILE, index=False)
         st.success("Main timeline data successfully saved!")
@@ -251,6 +218,7 @@ default_date_range = (
     edited_df_main["Start Date"].min() if "Start Date" in edited_df_main.columns and not edited_df_main["Start Date"].isnull().all() else datetime.today(),
     edited_df_main["End Date"].max() if "End Date" in edited_df_main.columns and not edited_df_main["End Date"].isnull().all() else datetime.today()
 )
+# The date_input widget will manage its own state with key="date_range"
 selected_date_range = st.sidebar.date_input("Filter Date Range", value=default_date_range, key="date_range")
 
 if st.sidebar.button("Clear Filters (Main)"):
@@ -259,7 +227,7 @@ if st.sidebar.button("Clear Filters (Main)"):
     st.session_state["task_filter"] = []
     st.session_state["room_filter"] = []
     st.session_state["status_filter"] = []
-    # (We intentionally do not reset the date range widget to original default)
+    # Do not reset the date_input default here so that the user can modify it as needed
 
 # Multi‐select filters
 a_opts = norm_unique(edited_df_main, "Activity")
@@ -349,6 +317,7 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
     if not group_cols:
         return px.scatter(title="No group columns selected for Gantt")
 
+    # aggregator
     grouped = (
         df_input
         .groupby(group_cols, dropna=False)
@@ -369,19 +338,25 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
 
     now = pd.Timestamp(datetime.today().date())
 
+    # Updated aggregated_status now accepts both start and end dates.
     def aggregated_status(st_list, avg_prog, start_dt, end_dt):
         # treat unknown statuses as "Not Started"
         all_lower = [str(x).lower().strip() for x in st_list]
+        # If finished or 100% done
         if all(s == "finished" for s in all_lower) or avg_prog >= 100:
             return "Finished"
+        # If the end date is past and task is incomplete, mark as delayed
         if end_dt < now and avg_prog < 100:
             return "Delayed"
+        # Calculate total duration and a delay threshold (e.g., half the duration)
         total_duration = (end_dt - start_dt).total_seconds()
         if total_duration <= 0:
             total_duration = 1
         delay_threshold = start_dt + pd.Timedelta(seconds=total_duration * 0.5)
+        # If we are past the delay threshold and no progress, mark as delayed
         if now > delay_threshold and avg_prog == 0:
             return "Delayed"
+        # If marked as in progress but still 0% done, call it "Just Started"
         if "in progress" in all_lower:
             if avg_prog == 0:
                 return "Just Started"
@@ -457,14 +432,13 @@ gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status)
 # 6. KPI & CALCULATIONS
 # =====================================================================
 total_tasks = len(edited_df_main)
-if total_tasks == 0:
-    total_tasks = 1  # to avoid zero-division
 
+# Force Status string once more
 if "Status" in edited_df_main.columns:
     edited_df_main["Status"] = edited_df_main["Status"].astype(str).fillna("Not Started")
 
 finished_count = edited_df_main[edited_df_main["Status"].str.lower() == "finished"].shape[0]
-completion_pct = (finished_count / total_tasks * 100)
+completion_pct = (finished_count / total_tasks * 100) if total_tasks else 0
 inprogress_count = edited_df_main[edited_df_main["Status"].str.lower() == "in progress"].shape[0]
 notstart_count = edited_df_main[edited_df_main["Status"].str.lower() == "not started"].shape[0]
 
@@ -570,6 +544,7 @@ for needed_col in ["Item", "Quantity", "Order Status", "Delivery Status", "Notes
     if needed_col not in df_items.columns:
         df_items[needed_col] = ""
 
+# Force dtypes
 df_items["Item"] = df_items["Item"].astype(str)
 df_items["Quantity"] = pd.to_numeric(df_items["Quantity"], errors="coerce").fillna(0).astype(int)
 df_items["Order Status"] = df_items["Order Status"].astype(str)
@@ -577,32 +552,33 @@ df_items["Delivery Status"] = df_items["Delivery Status"].astype(str)
 df_items["Notes"] = df_items["Notes"].astype(str)
 
 # Configure columns for Items
-items_col_config = {
-    "Item": st.column_config.TextColumn(
-        "Item",
-        help="Name of the item"
-    ),
-    "Quantity": st.column_config.NumberColumn(
-        "Quantity",
-        min_value=0,
-        step=1,
-        help="Enter the quantity required."
-    ),
-    "Order Status": st.column_config.SelectboxColumn(
-        "Order Status",
-        options=["Ordered", "Not Ordered"],
-        help="Choose if this item is ordered or not ordered."
-    ),
-    "Delivery Status": st.column_config.SelectboxColumn(
-        "Delivery Status",
-        options=["Delivered", "Not Delivered", "Delayed"],
-        help="Has it been delivered, not delivered, or delayed?"
-    ),
-    "Notes": st.column_config.TextColumn(
-        "Notes",
-        help="Type any notes or remarks here."
-    ),
-}
+items_col_config = {}
+items_col_config["Item"] = st.column_config.TextColumn(
+    "Item",
+    help="Name of the item"
+)
+items_col_config["Quantity"] = st.column_config.NumberColumn(
+    "Quantity",
+    min_value=0,
+    step=1,
+    help="Enter the quantity required."
+)
+# Remove "Delayed" from Order Status options.
+items_col_config["Order Status"] = st.column_config.SelectboxColumn(
+    "Order Status",
+    options=["Ordered", "Not Ordered"],
+    help="Choose if this item is ordered or not ordered."
+)
+# Add "Delayed" option to Delivery Status.
+items_col_config["Delivery Status"] = st.column_config.SelectboxColumn(
+    "Delivery Status",
+    options=["Delivered", "Not Delivered", "Delayed"],
+    help="Has it been delivered, not delivered, or delayed?"
+)
+items_col_config["Notes"] = st.column_config.TextColumn(
+    "Notes",
+    help="Type any notes or remarks here."
+)
 
 edited_df_items = st.data_editor(
     df_items,
