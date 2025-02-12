@@ -65,10 +65,7 @@ def load_timeline_data(file_path: str) -> pd.DataFrame:
     df["Status"] = df["Status"].astype(str).fillna("Not Started")
 
     # Optionally convert other columns if needed (e.g. "Activity", "Room" → string)
-    # We'll do it after editing as well for safety.
-
     return df
-
 
 DATA_FILE = "construction_timeline.xlsx"
 df_main = load_timeline_data(DATA_FILE)
@@ -89,6 +86,8 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
                 try:
                     df_main.to_excel(DATA_FILE, index=False)
                     st.sidebar.success(f"Row {idx} deleted and saved.")
+                    load_timeline_data.clear()  # clear cache and reload data
+                    df_main = load_timeline_data(DATA_FILE)
                 except Exception as e:
                     st.sidebar.error(f"Error saving data: {e}")
             else:
@@ -112,6 +111,8 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
             try:
                 df_main.to_excel(DATA_FILE, index=False)
                 st.sidebar.success(f"Column '{new_col_name}' added and saved.")
+                load_timeline_data.clear()  # clear cache and reload data
+                df_main = load_timeline_data(DATA_FILE)
             except Exception as e:
                 st.sidebar.error(f"Error saving data: {e}")
         elif new_col_name in df_main.columns:
@@ -131,12 +132,14 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
             try:
                 df_main.to_excel(DATA_FILE, index=False)
                 st.sidebar.success(f"Column '{col_to_delete}' deleted and saved.")
+                load_timeline_data.clear()
+                df_main = load_timeline_data(DATA_FILE)
             except Exception as e:
                 st.sidebar.error(f"Error saving data: {e}")
         else:
             st.sidebar.warning("Please select a valid column.")
 
-# Config for st.data_editor in the main timeline
+# Configure columns for st.data_editor in the main timeline
 column_config_main = {}
 if "Activity" in df_main.columns:
     column_config_main["Activity"] = st.column_config.SelectboxColumn(
@@ -205,10 +208,13 @@ if "room_filter" not in st.session_state:
 if "status_filter" not in st.session_state:
     st.session_state["status_filter"] = []
 
-if "date_range" not in st.session_state:
-    _min = edited_df_main["Start Date"].min() if "Start Date" in edited_df_main.columns else datetime.today()
-    _max = edited_df_main["End Date"].max() if "End Date" in edited_df_main.columns else datetime.today()
-    st.session_state["date_range"] = [_min, _max]
+# --- Date Range: use a default computed once, but allow the widget to be edited ---
+default_date_range = (
+    edited_df_main["Start Date"].min() if "Start Date" in edited_df_main.columns and not edited_df_main["Start Date"].isnull().all() else datetime.today(),
+    edited_df_main["End Date"].max() if "End Date" in edited_df_main.columns and not edited_df_main["End Date"].isnull().all() else datetime.today()
+)
+# The date_input widget will manage its own state with key="date_range"
+selected_date_range = st.sidebar.date_input("Filter Date Range", value=default_date_range, key="date_range")
 
 if st.sidebar.button("Clear Filters (Main)"):
     st.session_state["activity_filter"] = []
@@ -216,10 +222,7 @@ if st.sidebar.button("Clear Filters (Main)"):
     st.session_state["task_filter"] = []
     st.session_state["room_filter"] = []
     st.session_state["status_filter"] = []
-    if "Start Date" in edited_df_main.columns and "End Date" in edited_df_main.columns:
-        st.session_state["date_range"] = [edited_df_main["Start Date"].min(), edited_df_main["End Date"].max()]
-    else:
-        st.session_state["date_range"] = [datetime.today(), datetime.today()]
+    # Do not reset the date_input default here so that the user can modify it as needed
 
 # Multi‐select filters
 a_opts = norm_unique(edited_df_main, "Activity")
@@ -245,16 +248,6 @@ st.sidebar.markdown("**Refine Gantt Grouping**")
 group_by_room = st.sidebar.checkbox("Group by Room", value=False)
 group_by_item = st.sidebar.checkbox("Group by Item", value=False)
 group_by_task = st.sidebar.checkbox("Group by Task", value=False)
-
-# Date range
-date_values = st.session_state["date_range"]
-if len(date_values) != 2:
-    _temp_min = edited_df_main["Start Date"].min() if "Start Date" in edited_df_main.columns else datetime.today()
-    _temp_max = edited_df_main["End Date"].max() if "End Date" in edited_df_main.columns else datetime.today()
-    st.session_state["date_range"] = [_temp_min, _temp_max]
-    date_values = st.session_state["date_range"]
-
-selected_date_range = st.sidebar.date_input("Filter Date Range", value=date_values, key="date_range")
 
 # =====================================================================
 # 4. FILTER MAIN TABLE FOR GANTT
@@ -283,15 +276,15 @@ if selected_statuses:
 if not show_finished:
     df_filtered = df_filtered[~df_filtered["Status_norm"].isin(["finished"])]
 
+# Use the user‐selected date range from the date_input widget
 if "Start Date" in df_filtered.columns and "End Date" in df_filtered.columns:
-    if len(st.session_state["date_range"]) == 2:
-        srange, erange = st.session_state["date_range"]
-        srange = pd.to_datetime(srange)
-        erange = pd.to_datetime(erange)
-        df_filtered = df_filtered[
-            (df_filtered["Start Date"] >= srange) &
-            (df_filtered["End Date"] <= erange)
-        ]
+    srange, erange = selected_date_range  # get the dates from the widget
+    srange = pd.to_datetime(srange)
+    erange = pd.to_datetime(erange)
+    df_filtered = df_filtered[
+        (df_filtered["Start Date"] >= srange) &
+        (df_filtered["End Date"] <= erange)
+    ]
 
 normcols = [c for c in df_filtered.columns if c.endswith("_norm")]
 df_filtered.drop(columns=normcols, inplace=True, errors="ignore")
@@ -340,14 +333,28 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
 
     now = pd.Timestamp(datetime.today().date())
 
-    def aggregated_status(st_list, avg_prog, end_dt):
+    # Updated aggregated_status now accepts both start and end dates.
+    def aggregated_status(st_list, avg_prog, start_dt, end_dt):
         # treat unknown statuses as "Not Started"
         all_lower = [str(x).lower().strip() for x in st_list]
+        # If finished or 100% done
         if all(s == "finished" for s in all_lower) or avg_prog >= 100:
             return "Finished"
+        # If the end date is past and task is incomplete, mark as delayed
         if end_dt < now and avg_prog < 100:
             return "Delayed"
+        # Calculate total duration and a delay threshold (e.g., half the duration)
+        total_duration = (end_dt - start_dt).total_seconds()
+        if total_duration <= 0:
+            total_duration = 1
+        delay_threshold = start_dt + pd.Timedelta(seconds=total_duration * 0.5)
+        # If we are past the delay threshold and no progress, mark as delayed
+        if now > delay_threshold and avg_prog == 0:
+            return "Delayed"
+        # If marked as in progress but still 0% done, call it "Just Started"
         if "in progress" in all_lower:
+            if avg_prog == 0:
+                return "Just Started"
             return "In Progress"
         return "Not Started"
 
@@ -358,7 +365,7 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
         start = row["GroupStart"]
         end = row["GroupEnd"]
         avgp = row["AvgProgress"]
-        final_st = aggregated_status(st_list, avgp, end)
+        final_st = aggregated_status(st_list, avgp, start, end)
 
         if final_st == "In Progress" and 0 < avgp < 100:
             total_s = (end - start).total_seconds()
@@ -395,6 +402,7 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
 
     color_map = {
         "Not Started": "lightgray",
+        "Just Started": "lightgreen",
         "In Progress (Completed part)": "darkblue",
         "In Progress (Remaining part)": "lightgray",
         "Finished": "green",
@@ -465,8 +473,8 @@ if selected_room_norm:
     filt_summ.append("Rooms: " + ", ".join(selected_room_norm))
 if selected_statuses:
     filt_summ.append("Status: " + ", ".join(selected_statuses))
-if len(st.session_state["date_range"]) == 2:
-    d0, d1 = st.session_state["date_range"]
+if selected_date_range:
+    d0, d1 = selected_date_range
     filt_summ.append(f"Date Range: {d0} to {d1}")
 filt_text = "; ".join(filt_summ) if filt_summ else "No filters applied."
 
@@ -552,7 +560,7 @@ items_col_config["Quantity"] = st.column_config.NumberColumn(
 )
 items_col_config["Order Status"] = st.column_config.SelectboxColumn(
     "Order Status",
-    options=["Ordered", "Not Ordered", "Delayed"],  # includes "Delayed"
+    options=["Ordered", "Not Ordered", "Delayed"],
     help="Choose if this item is ordered, not ordered, or delayed."
 )
 items_col_config["Delivery Status"] = st.column_config.SelectboxColumn(
@@ -574,7 +582,6 @@ edited_df_items = st.data_editor(
 
 if st.button("Save Items Table"):
     try:
-        # Convert Quantity again in case user typed floats, etc.
         edited_df_items["Quantity"] = pd.to_numeric(edited_df_items["Quantity"], errors="coerce").fillna(0).astype(int)
         edited_df_items.to_csv(ITEMS_FILE, index=False)
         st.success("Items table successfully saved to Cleaned_Items_Table.csv!")
