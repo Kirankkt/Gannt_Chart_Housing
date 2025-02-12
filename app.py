@@ -41,30 +41,25 @@ def load_timeline_data(file_path: str) -> pd.DataFrame:
     df.columns = df.columns.str.strip()
 
     # Convert Start/End Dates if present
-    if "Start Date" in df.columns:
-        df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce")
-    if "End Date" in df.columns:
-        df["End Date"] = pd.to_datetime(df["End Date"], errors="coerce")
+    date_cols = ["Start Date", "End Date"]
+    for col in date_cols:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors="coerce")
 
-    # Ensure "Progress" column
+    # Ensure "Progress" column exists and is numeric
     if "Progress" not in df.columns:
         df["Progress"] = 0.0
-
-    # Ensure "Status" column
-    if "Status" not in df.columns:
-        df["Status"] = "Not Started"
-
-    # Convert "Progress" to numeric
     df["Progress"] = pd.to_numeric(df["Progress"], errors="coerce").fillna(0)
 
-    # Remove "Order Status" from main timeline if present
-    if "Order Status" in df.columns:
-        df.drop(columns=["Order Status"], inplace=True)
-
-    # Type‐check: "Status" must be string
+    # Ensure "Status" column exists and is string type
+    if "Status" not in df.columns:
+        df["Status"] = "Not Started"
     df["Status"] = df["Status"].astype(str).fillna("Not Started")
 
-    # Optionally convert other columns if needed (e.g. "Activity", "Room" → string)
+    # Convert all object-type columns to string to prevent numeric inference
+    for col in df.select_dtypes(include=['object']).columns:
+        df[col] = df[col].astype(str)
+
     return df
 
 DATA_FILE = "construction_timeline.xlsx"
@@ -76,7 +71,7 @@ df_main = load_timeline_data(DATA_FILE)
 st.subheader("Update Task Information (Main Timeline)")
 
 with st.sidebar.expander("Row & Column Management (Main Timeline)"):
-    st.markdown("*Delete a row by index*")
+    st.markdown("**Delete a row by index**")
     delete_index = st.text_input("Enter row index to delete (main table)", value="")
     if st.button("Delete Row (Main)"):
         if delete_index.isdigit():
@@ -86,7 +81,7 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
                 try:
                     df_main.to_excel(DATA_FILE, index=False)
                     st.sidebar.success(f"Row {idx} deleted and saved.")
-                    load_timeline_data.clear()  # clear cache and reload data
+                    load_timeline_data.clear()
                     df_main = load_timeline_data(DATA_FILE)
                 except Exception as e:
                     st.sidebar.error(f"Error saving data: {e}")
@@ -95,15 +90,14 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
         else:
             st.sidebar.error("Please enter a valid integer index.")
 
-    st.markdown("*Add a new column*")
+    st.markdown("**Add a new column**")
     new_col_name = st.text_input("New Column Name (main table)", value="")
     new_col_type = st.selectbox("Column Type (main table)", ["string", "integer", "float", "datetime"])
     if st.button("Add Column (Main)"):
         if new_col_name and new_col_name not in df_main.columns:
-            # For a "string" type, initialize with an empty string and force object dtype.
             if new_col_type == "string":
-                df_main[new_col_name] = ""
-                df_main[new_col_name] = df_main[new_col_name].astype(object)
+                df_main[new_col_name] = "N/A"  # Initialize with placeholder
+                df_main[new_col_name] = df_main[new_col_name].astype(str)
             elif new_col_type == "integer":
                 df_main[new_col_name] = 0
             elif new_col_type == "float":
@@ -113,7 +107,7 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
             try:
                 df_main.to_excel(DATA_FILE, index=False)
                 st.sidebar.success(f"Column '{new_col_name}' added and saved.")
-                load_timeline_data.clear()  # clear cache and reload data
+                load_timeline_data.clear()
                 df_main = load_timeline_data(DATA_FILE)
             except Exception as e:
                 st.sidebar.error(f"Error saving data: {e}")
@@ -122,7 +116,7 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
         else:
             st.sidebar.warning("Please enter a valid column name.")
 
-    st.markdown("*Delete a column*")
+    st.markdown("**Delete a column**")
     col_to_delete = st.selectbox(
         "Select Column to Delete (main table)",
         options=[""] + list(df_main.columns),
@@ -141,34 +135,23 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
         else:
             st.sidebar.warning("Please select a valid column.")
 
-# Configure columns for st.data_editor in the main timeline
 column_config_main = {}
-if "Activity" in df_main.columns:
-    column_config_main["Activity"] = st.column_config.SelectboxColumn(
-        "Activity", options=sorted(df_main["Activity"].dropna().unique()), help="Activity"
-    )
-if "Item" in df_main.columns:
-    column_config_main["Item"] = st.column_config.SelectboxColumn(
-        "Item", options=sorted(df_main["Item"].dropna().unique()), help="Item"
-    )
-if "Task" in df_main.columns:
-    column_config_main["Task"] = st.column_config.SelectboxColumn(
-        "Task", options=sorted(df_main["Task"].dropna().unique()), help="Task"
-    )
-if "Room" in df_main.columns:
-    column_config_main["Room"] = st.column_config.SelectboxColumn(
-        "Room", options=sorted(df_main["Room"].dropna().unique()), help="Room"
-    )
+for col in ["Activity", "Item", "Task", "Room"]:
+    if col in df_main.columns:
+        column_config_main[col] = st.column_config.SelectboxColumn(
+            col, options=sorted(df_main[col].dropna().unique())
+        )
+
 if "Status" in df_main.columns:
     column_config_main["Status"] = st.column_config.SelectboxColumn(
-        "Status", options=["Finished", "In Progress", "Not Started"], help="Status"
-    )
-if "Progress" in df_main.columns:
-    column_config_main["Progress"] = st.column_config.NumberColumn(
-        "Progress", min_value=0, max_value=100, step=1, help="Progress %"
+        "Status", options=["Finished", "In Progress", "Not Started"]
     )
 
-# Edit the main timeline
+if "Progress" in df_main.columns:
+    column_config_main["Progress"] = st.column_config.NumberColumn(
+        "Progress", min_value=0, max_value=100, step=1
+    )
+
 edited_df_main = st.data_editor(
     df_main,
     column_config=column_config_main,
@@ -176,20 +159,26 @@ edited_df_main = st.data_editor(
     num_rows="dynamic"
 )
 
-# Force "Status" to string once user is done editing
-if "Status" in edited_df_main.columns:
-    edited_df_main["Status"] = edited_df_main["Status"].astype(str).fillna("Not Started")
+# Auto-update Progress when Status is Finished (real-time)
+if "Status" in edited_df_main.columns and "Progress" in edited_df_main.columns:
+    edited_df_main["Status"] = edited_df_main["Status"].astype(str)
+    mask = edited_df_main["Status"].str.lower() == "finished"
+    edited_df_main.loc[mask, "Progress"] = 100
 
-# --- Auto-update Progress when Status is Finished ---
 if st.button("Save Updates (Main Timeline)"):
-    # If Status is "Finished", update Progress to 100.
-    edited_df_main.loc[edited_df_main["Status"].str.lower() == "finished", "Progress"] = 100
     try:
         edited_df_main.to_excel(DATA_FILE, index=False)
         st.success("Main timeline data successfully saved!")
         load_timeline_data.clear()
     except Exception as e:
         st.error(f"Error saving main timeline: {e}")
+
+# =====================================================================
+# REST OF THE CODE REMAINS UNCHANGED (FILTERS, GANTT CHART, ITEMS TABLE)
+# =====================================================================
+# [Include all remaining sections from the original code without modification]
+# ... (Filters, Gantt chart function, KPI calculations, Items table section)
+
 
 # =====================================================================
 # 3. SIDEBAR FILTERS FOR MAIN TIMELINE
