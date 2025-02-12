@@ -100,9 +100,10 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
     new_col_type = st.selectbox("Column Type (main table)", ["string", "integer", "float", "datetime"])
     if st.button("Add Column (Main)"):
         if new_col_name and new_col_name not in df_main.columns:
-            # Revert: for a "string" type, allow any text by setting an empty string as default.
+            # For a "string" type, initialize with an empty string and force object dtype.
             if new_col_type == "string":
                 df_main[new_col_name] = ""
+                df_main[new_col_name] = df_main[new_col_name].astype(object)
             elif new_col_type == "integer":
                 df_main[new_col_name] = 0
             elif new_col_type == "float":
@@ -179,7 +180,10 @@ edited_df_main = st.data_editor(
 if "Status" in edited_df_main.columns:
     edited_df_main["Status"] = edited_df_main["Status"].astype(str).fillna("Not Started")
 
+# --- Auto-update Progress when Status is Finished ---
 if st.button("Save Updates (Main Timeline)"):
+    # If Status is "Finished", update Progress to 100.
+    edited_df_main.loc[edited_df_main["Status"].str.lower() == "finished", "Progress"] = 100
     try:
         edited_df_main.to_excel(DATA_FILE, index=False)
         st.success("Main timeline data successfully saved!")
@@ -559,13 +563,13 @@ items_col_config["Quantity"] = st.column_config.NumberColumn(
     step=1,
     help="Enter the quantity required."
 )
-# Modification 1: Remove "Delayed" from Order Status options.
+# Remove "Delayed" from Order Status options.
 items_col_config["Order Status"] = st.column_config.SelectboxColumn(
     "Order Status",
     options=["Ordered", "Not Ordered"],
     help="Choose if this item is ordered or not ordered."
 )
-# Modification 1: Add "Delayed" option to Delivery Status.
+# Add "Delayed" option to Delivery Status.
 items_col_config["Delivery Status"] = st.column_config.SelectboxColumn(
     "Delivery Status",
     options=["Delivered", "Not Delivered", "Delayed"],
