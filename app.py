@@ -100,6 +100,7 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
     new_col_type = st.selectbox("Column Type (main table)", ["string", "integer", "float", "datetime"])
     if st.button("Add Column (Main)"):
         if new_col_name and new_col_name not in df_main.columns:
+            # Revert: for a "string" type, allow any text by setting an empty string as default.
             if new_col_type == "string":
                 df_main[new_col_name] = ""
             elif new_col_type == "integer":
@@ -558,15 +559,17 @@ items_col_config["Quantity"] = st.column_config.NumberColumn(
     step=1,
     help="Enter the quantity required."
 )
+# Modification 1: Remove "Delayed" from Order Status options.
 items_col_config["Order Status"] = st.column_config.SelectboxColumn(
     "Order Status",
-    options=["Ordered", "Not Ordered", "Delayed"],
-    help="Choose if this item is ordered, not ordered, or delayed."
+    options=["Ordered", "Not Ordered"],
+    help="Choose if this item is ordered or not ordered."
 )
+# Modification 1: Add "Delayed" option to Delivery Status.
 items_col_config["Delivery Status"] = st.column_config.SelectboxColumn(
     "Delivery Status",
-    options=["Delivered", "Not Delivered"],
-    help="Has it been delivered or not?"
+    options=["Delivered", "Not Delivered", "Delayed"],
+    help="Has it been delivered, not delivered, or delayed?"
 )
 items_col_config["Notes"] = st.column_config.TextColumn(
     "Notes",
