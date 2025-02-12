@@ -62,9 +62,6 @@ def load_timeline_data(file_path: str) -> pd.DataFrame:
     if "Order Status" in df.columns:
         df.drop(columns=["Order Status"], inplace=True)
 
-    # We do NOT forcibly overwrite unknown statuses. 
-    # Gantt logic will treat unknown statuses as "Not Started" for color.
-
     return df
 
 DATA_FILE = "construction_timeline.xlsx"
@@ -133,7 +130,6 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
         else:
             st.sidebar.warning("Please select a valid column.")
 
-
 # ---------------------------------------------------------------------
 # 2A. CONFIG FOR st.data_editor (MAIN TIMELINE)
 # ---------------------------------------------------------------------
@@ -187,6 +183,10 @@ edited_df_main = st.data_editor(
     use_container_width=True,
     num_rows="dynamic"
 )
+
+# IMPORTANT: Force "Status" to be string
+if "Status" in edited_df_main.columns:
+    edited_df_main["Status"] = edited_df_main["Status"].astype(str).fillna("Not Started")
 
 if st.button("Save Updates (Main Timeline)"):
     try:
@@ -285,7 +285,6 @@ group_by_task = st.sidebar.checkbox("Group by Task", value=False)
 # DATE RANGE
 date_values = st.session_state["date_range"]
 if len(date_values) != 2:
-    # fallback if the user picks only 1 date or empties it
     _temp_min = edited_df_main["Start Date"].min() if "Start Date" in edited_df_main.columns else datetime.today()
     _temp_max = edited_df_main["End Date"].max() if "End Date" in edited_df_main.columns else datetime.today()
     st.session_state["date_range"] = [_temp_min, _temp_max]
@@ -302,7 +301,6 @@ selected_date_range = st.sidebar.date_input(
 # ---------------------------------------------------------------------
 df_filtered = edited_df_main.copy()
 
-# Create normalized columns for filtering
 for col in ["Activity", "Item", "Task", "Room", "Status"]:
     if col in df_filtered.columns:
         df_filtered[col+"_norm"] = df_filtered[col].astype(str).str.lower().str.strip()
@@ -319,7 +317,6 @@ if selected_statuses:
     df_filtered = df_filtered[df_filtered["Status_norm"].isin(selected_statuses)]
 
 if not show_finished:
-    # Exclude tasks with status = "finished"
     df_filtered = df_filtered[~df_filtered["Status_norm"].isin(["finished"])]
 
 if "Start Date" in df_filtered.columns and "End Date" in df_filtered.columns:
@@ -327,24 +324,18 @@ if "Start Date" in df_filtered.columns and "End Date" in df_filtered.columns:
         srange, erange = st.session_state["date_range"]
         srange = pd.to_datetime(srange)
         erange = pd.to_datetime(erange)
-        # Filter by date range
         df_filtered = df_filtered[
             (df_filtered["Start Date"] >= srange) &
             (df_filtered["End Date"] <= erange)
         ]
 
-# drop norms
 normcols = [c for c in df_filtered.columns if c.endswith("_norm")]
 df_filtered.drop(columns=normcols, inplace=True, errors="ignore")
-
 
 # ---------------------------------------------------------------------
 # 5. GANTT CHART FUNCTION
 # ---------------------------------------------------------------------
 def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
-    """Create a Gantt chart from df_input, requiring columns
-    ['Start Date','End Date','Status','Progress']. Groups by Activity + optional (Room,Item,Task).
-    """
     needed = ["Start Date", "End Date", "Status", "Progress"]
     for nc in needed:
         if nc not in df_input.columns:
@@ -353,7 +344,6 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
     if df_input.empty:
         return px.scatter(title="No data to display for Gantt")
 
-    # build group columns
     grouping = ["Activity"]
     if group_by_room and "Room" in df_input.columns:
         grouping.append("Room")
@@ -365,7 +355,6 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
     if not grouping:
         return px.scatter(title="No group columns selected for Gantt")
 
-    # robust aggregator
     grouped = (
         df_input
         .groupby(grouping, dropna=False)
@@ -373,7 +362,6 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
             "Start Date": "min",
             "End Date": "max",
             "Progress": "mean",
-            # Force statuses to strings, ignoring nulls
             "Status": lambda s: list(s.dropna().astype(str))
         })
         .reset_index()
@@ -388,7 +376,6 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
     now = pd.Timestamp(datetime.today().date())
 
     def agg_status(st_list, avg_prog, end_dt):
-        """Simplify grouping logic for color. Unknown statuses => treat as Not Started."""
         all_lower = [val.lower().strip() for val in st_list]
         if all(s == "finished" for s in all_lower) or avg_prog >= 100:
             return "Finished"
@@ -396,7 +383,6 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
             return "Delayed"
         if "in progress" in all_lower:
             return "In Progress"
-        # fallback: Not Started
         return "Not Started"
 
     segments = []
@@ -407,14 +393,11 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
         end = row["GroupEnd"]
         avgp = row["AvgProgress"]
 
-        # determine aggregated status
         final_st = agg_status(st_list, avgp, end)
-
         if final_st == "In Progress" and 0 < avgp < 100:
             total_s = (end - start).total_seconds()
             done_s = total_s * (avgp / 100.0)
             done_end = start + pd.Timedelta(seconds=done_s)
-            # Completed portion
             segments.append({
                 "Group Label": label,
                 "Start": start,
@@ -422,7 +405,6 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
                 "Display Status": "In Progress (Completed part)",
                 "Progress": f"{avgp:.0f}%"
             })
-            # Remaining portion
             remain_pct = 100 - avgp
             segments.append({
                 "Group Label": label,
@@ -432,7 +414,6 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
                 "Progress": f"{remain_pct:.0f}%"
             })
         else:
-            # single segment
             segments.append({
                 "Group Label": label,
                 "Start": start,
@@ -472,6 +453,11 @@ gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status)
 # 6. KPI & CALCULATIONS
 # ---------------------------------------------------------------------
 total_tasks = len(edited_df_main)
+
+# Force "Status" to string again, just to be safe
+if "Status" in edited_df_main.columns:
+    edited_df_main["Status"] = edited_df_main["Status"].astype(str).fillna("Not Started")
+
 finished_count = edited_df_main[edited_df_main["Status"].str.lower() == "finished"].shape[0]
 completion_pct = (finished_count / total_tasks * 100) if total_tasks else 0
 
@@ -504,7 +490,6 @@ if "Start Date" in df_filtered.columns:
 else:
     next7_df = pd.DataFrame()
 
-# build filter summary
 filt_summ = []
 if selected_activity_norm:
     filt_summ.append("Activities: " + ", ".join(selected_activity_norm))
@@ -561,7 +546,6 @@ mcol4.metric("Not Started", notstart_count)
 
 st.markdown("Use the filters on the sidebar to adjust the view.")
 st.markdown("---")
-
 
 # ---------------------------------------------------------------------
 # 8. SECOND TABLE: ITEMS TO ORDER (CSV)
