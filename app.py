@@ -46,24 +46,25 @@ def load_timeline_data(file_path: str) -> pd.DataFrame:
     if "End Date" in df.columns:
         df["End Date"] = pd.to_datetime(df["End Date"], errors="coerce")
 
-    # Ensure "Progress" column exists
+    # Ensure "Progress" column
     if "Progress" not in df.columns:
         df["Progress"] = 0.0
 
-    # Ensure "Status" column exists
+    # Ensure "Status" column
     if "Status" not in df.columns:
         df["Status"] = "Not Started"
 
     # Convert "Progress" to numeric
     df["Progress"] = pd.to_numeric(df["Progress"], errors="coerce").fillna(0)
 
-    # Remove "Order Status" if present
+    # Remove "Order Status" from main timeline if present
     if "Order Status" in df.columns:
         df.drop(columns=["Order Status"], inplace=True)
 
-    # Ensure "Status" is a string
+    # Type‐check: "Status" must be string
     df["Status"] = df["Status"].astype(str).fillna("Not Started")
 
+    # Optionally convert other columns if needed (e.g. "Activity", "Room" → string)
     return df
 
 DATA_FILE = "construction_timeline.xlsx"
@@ -99,6 +100,7 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
     new_col_type = st.selectbox("Column Type (main table)", ["string", "integer", "float", "datetime"])
     if st.button("Add Column (Main)"):
         if new_col_name and new_col_name not in df_main.columns:
+            # For a "string" type, initialize with an empty string and force object dtype.
             if new_col_type == "string":
                 df_main[new_col_name] = ""
                 df_main[new_col_name] = df_main[new_col_name].astype(object)
@@ -166,7 +168,7 @@ if "Progress" in df_main.columns:
         "Progress", min_value=0, max_value=100, step=1, help="Progress %"
     )
 
-# Edit the main timeline using the data editor
+# Edit the main timeline
 edited_df_main = st.data_editor(
     df_main,
     column_config=column_config_main,
@@ -174,23 +176,13 @@ edited_df_main = st.data_editor(
     num_rows="dynamic"
 )
 
-# Force "Status" to string once editing is done
+# Force "Status" to string once user is done editing
 if "Status" in edited_df_main.columns:
     edited_df_main["Status"] = edited_df_main["Status"].astype(str).fillna("Not Started")
 
 # --- Auto-update Progress when Status is Finished ---
-if "Status" in edited_df_main.columns and "Progress" in edited_df_main.columns:
-    mask_finished = edited_df_main["Status"].str.lower() == "finished"
-    if mask_finished.any() and not edited_df_main.loc[mask_finished, "Progress"].eq(100).all():
-        edited_df_main.loc[mask_finished, "Progress"] = 100
-        try:
-            # Try to force a rerun so the updated table and Gantt chart are reflected.
-            st.experimental_rerun()
-        except AttributeError:
-            st.warning("st.experimental_rerun() is not available in your Streamlit version. Please consider upgrading Streamlit to enable auto refresh.")
-
-# Save Updates button (when clicked, the data is saved to Excel)
 if st.button("Save Updates (Main Timeline)"):
+    # If Status is "Finished", update Progress to 100.
     edited_df_main.loc[edited_df_main["Status"].str.lower() == "finished", "Progress"] = 100
     try:
         edited_df_main.to_excel(DATA_FILE, index=False)
@@ -221,10 +213,12 @@ if "room_filter" not in st.session_state:
 if "status_filter" not in st.session_state:
     st.session_state["status_filter"] = []
 
+# --- Date Range: use a default computed once, but allow the widget to be edited ---
 default_date_range = (
     edited_df_main["Start Date"].min() if "Start Date" in edited_df_main.columns and not edited_df_main["Start Date"].isnull().all() else datetime.today(),
     edited_df_main["End Date"].max() if "End Date" in edited_df_main.columns and not edited_df_main["End Date"].isnull().all() else datetime.today()
 )
+# The date_input widget will manage its own state with key="date_range"
 selected_date_range = st.sidebar.date_input("Filter Date Range", value=default_date_range, key="date_range")
 
 if st.sidebar.button("Clear Filters (Main)"):
@@ -233,7 +227,9 @@ if st.sidebar.button("Clear Filters (Main)"):
     st.session_state["task_filter"] = []
     st.session_state["room_filter"] = []
     st.session_state["status_filter"] = []
+    # Do not reset the date_input default here so that the user can modify it as needed
 
+# Multi‐select filters
 a_opts = norm_unique(edited_df_main, "Activity")
 selected_activity_norm = st.sidebar.multiselect("Filter by Activity", options=a_opts,
     default=st.session_state["activity_filter"], key="activity_filter")
@@ -263,6 +259,7 @@ group_by_task = st.sidebar.checkbox("Group by Task", value=False)
 # =====================================================================
 df_filtered = edited_df_main.copy()
 
+# Force status to string
 if "Status" in df_filtered.columns:
     df_filtered["Status"] = df_filtered["Status"].astype(str).fillna("Not Started")
 
@@ -284,8 +281,9 @@ if selected_statuses:
 if not show_finished:
     df_filtered = df_filtered[~df_filtered["Status_norm"].isin(["finished"])]
 
+# Use the user‐selected date range from the date_input widget
 if "Start Date" in df_filtered.columns and "End Date" in df_filtered.columns:
-    srange, erange = selected_date_range
+    srange, erange = selected_date_range  # get the dates from the widget
     srange = pd.to_datetime(srange)
     erange = pd.to_datetime(erange)
     df_filtered = df_filtered[
@@ -319,6 +317,7 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
     if not group_cols:
         return px.scatter(title="No group columns selected for Gantt")
 
+    # aggregator
     grouped = (
         df_input
         .groupby(group_cols, dropna=False)
@@ -339,18 +338,25 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
 
     now = pd.Timestamp(datetime.today().date())
 
+    # Updated aggregated_status now accepts both start and end dates.
     def aggregated_status(st_list, avg_prog, start_dt, end_dt):
+        # treat unknown statuses as "Not Started"
         all_lower = [str(x).lower().strip() for x in st_list]
+        # If finished or 100% done
         if all(s == "finished" for s in all_lower) or avg_prog >= 100:
             return "Finished"
+        # If the end date is past and task is incomplete, mark as delayed
         if end_dt < now and avg_prog < 100:
             return "Delayed"
+        # Calculate total duration and a delay threshold (e.g., half the duration)
         total_duration = (end_dt - start_dt).total_seconds()
         if total_duration <= 0:
             total_duration = 1
         delay_threshold = start_dt + pd.Timedelta(seconds=total_duration * 0.5)
+        # If we are past the delay threshold and no progress, mark as delayed
         if now > delay_threshold and avg_prog == 0:
             return "Delayed"
+        # If marked as in progress but still 0% done, call it "Just Started"
         if "in progress" in all_lower:
             if avg_prog == 0:
                 return "Just Started"
@@ -370,6 +376,7 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
             total_s = (end - start).total_seconds()
             done_s = total_s * (avgp / 100.0)
             done_end = start + pd.Timedelta(seconds=done_s)
+            # completed portion
             segments.append({
                 "Group Label": label,
                 "Start": start,
@@ -426,6 +433,7 @@ gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status)
 # =====================================================================
 total_tasks = len(edited_df_main)
 
+# Force Status string once more
 if "Status" in edited_df_main.columns:
     edited_df_main["Status"] = edited_df_main["Status"].astype(str).fillna("Not Started")
 
@@ -531,16 +539,19 @@ ITEMS_FILE = "Cleaned_Items_Table.csv"
 st.header("Items to Order")
 df_items = load_items_data(ITEMS_FILE)
 
+# Ensure all needed columns exist & correct dtypes
 for needed_col in ["Item", "Quantity", "Order Status", "Delivery Status", "Notes"]:
     if needed_col not in df_items.columns:
         df_items[needed_col] = ""
 
+# Force dtypes
 df_items["Item"] = df_items["Item"].astype(str)
 df_items["Quantity"] = pd.to_numeric(df_items["Quantity"], errors="coerce").fillna(0).astype(int)
 df_items["Order Status"] = df_items["Order Status"].astype(str)
 df_items["Delivery Status"] = df_items["Delivery Status"].astype(str)
 df_items["Notes"] = df_items["Notes"].astype(str)
 
+# Configure columns for Items
 items_col_config = {}
 items_col_config["Item"] = st.column_config.TextColumn(
     "Item",
@@ -552,11 +563,13 @@ items_col_config["Quantity"] = st.column_config.NumberColumn(
     step=1,
     help="Enter the quantity required."
 )
+# Remove "Delayed" from Order Status options.
 items_col_config["Order Status"] = st.column_config.SelectboxColumn(
     "Order Status",
     options=["Ordered", "Not Ordered"],
     help="Choose if this item is ordered or not ordered."
 )
+# Add "Delayed" option to Delivery Status.
 items_col_config["Delivery Status"] = st.column_config.SelectboxColumn(
     "Delivery Status",
     options=["Delivered", "Not Delivered", "Delayed"],
@@ -583,6 +596,7 @@ if st.button("Save Items Table"):
     except Exception as e:
         st.error(f"Error saving items table: {e}")
 
+# Download button for the items table
 csv_buffer = io.StringIO()
 edited_df_items.to_csv(csv_buffer, index=False)
 st.download_button(
