@@ -61,16 +61,14 @@ def load_timeline_data(file_path: str) -> pd.DataFrame:
     if "Order Status" in df.columns:
         df.drop(columns=["Order Status"], inplace=True)
 
-    # Ensure "Status" is string and default to "Not Started"
+    # Type‐check: "Status" must be string
     df["Status"] = df["Status"].astype(str).fillna("Not Started")
+
+    # Optionally convert other columns if needed (e.g. "Activity", "Room" → string)
     return df
 
 DATA_FILE = "construction_timeline.xlsx"
 df_main = load_timeline_data(DATA_FILE)
-
-# Initialize session state for the main timeline data
-if "main_timeline_data" not in st.session_state:
-    st.session_state["main_timeline_data"] = df_main.copy()
 
 # ---------------------------------------------------------------------
 # 2. MAIN TIMELINE: EDIT & SAVE
@@ -78,17 +76,18 @@ if "main_timeline_data" not in st.session_state:
 st.subheader("Update Task Information (Main Timeline)")
 
 with st.sidebar.expander("Row & Column Management (Main Timeline)"):
-    st.markdown("**Delete a row by index**")
+    st.markdown("*Delete a row by index*")
     delete_index = st.text_input("Enter row index to delete (main table)", value="")
     if st.button("Delete Row (Main)"):
         if delete_index.isdigit():
             idx = int(delete_index)
-            if 0 <= idx < len(st.session_state["main_timeline_data"]):
-                st.session_state["main_timeline_data"].drop(st.session_state["main_timeline_data"].index[idx], inplace=True)
+            if 0 <= idx < len(df_main):
+                df_main.drop(df_main.index[idx], inplace=True)
                 try:
-                    st.session_state["main_timeline_data"].to_excel(DATA_FILE, index=False)
+                    df_main.to_excel(DATA_FILE, index=False)
                     st.sidebar.success(f"Row {idx} deleted and saved.")
-                    st.session_state["main_timeline_data"] = load_timeline_data(DATA_FILE)
+                    load_timeline_data.clear()  # clear cache and reload data
+                    df_main = load_timeline_data(DATA_FILE)
                 except Exception as e:
                     st.sidebar.error(f"Error saving data: {e}")
             else:
@@ -96,43 +95,47 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
         else:
             st.sidebar.error("Please enter a valid integer index.")
 
-    st.markdown("**Add a new column**")
+    st.markdown("*Add a new column*")
     new_col_name = st.text_input("New Column Name (main table)", value="")
     new_col_type = st.selectbox("Column Type (main table)", ["string", "integer", "float", "datetime"])
     if st.button("Add Column (Main)"):
-        if new_col_name and new_col_name not in st.session_state["main_timeline_data"].columns:
+        if new_col_name and new_col_name not in df_main.columns:
+            # For a "string" type, initialize with an empty string and force object dtype.
             if new_col_type == "string":
-                st.session_state["main_timeline_data"][new_col_name] = ""  # Allow any text
+                df_main[new_col_name] = ""
+                df_main[new_col_name] = df_main[new_col_name].astype(object)
             elif new_col_type == "integer":
-                st.session_state["main_timeline_data"][new_col_name] = 0
+                df_main[new_col_name] = 0
             elif new_col_type == "float":
-                st.session_state["main_timeline_data"][new_col_name] = 0.0
+                df_main[new_col_name] = 0.0
             elif new_col_type == "datetime":
-                st.session_state["main_timeline_data"][new_col_name] = pd.NaT
+                df_main[new_col_name] = pd.NaT
             try:
-                st.session_state["main_timeline_data"].to_excel(DATA_FILE, index=False)
+                df_main.to_excel(DATA_FILE, index=False)
                 st.sidebar.success(f"Column '{new_col_name}' added and saved.")
-                st.session_state["main_timeline_data"] = load_timeline_data(DATA_FILE)
+                load_timeline_data.clear()  # clear cache and reload data
+                df_main = load_timeline_data(DATA_FILE)
             except Exception as e:
                 st.sidebar.error(f"Error saving data: {e}")
-        elif new_col_name in st.session_state["main_timeline_data"].columns:
+        elif new_col_name in df_main.columns:
             st.sidebar.warning("Column already exists or invalid name.")
         else:
             st.sidebar.warning("Please enter a valid column name.")
 
-    st.markdown("**Delete a column**")
+    st.markdown("*Delete a column*")
     col_to_delete = st.selectbox(
         "Select Column to Delete (main table)",
-        options=[""] + list(st.session_state["main_timeline_data"].columns),
+        options=[""] + list(df_main.columns),
         index=0
     )
     if st.button("Delete Column (Main)"):
-        if col_to_delete and col_to_delete in st.session_state["main_timeline_data"].columns:
-            st.session_state["main_timeline_data"].drop(columns=[col_to_delete], inplace=True)
+        if col_to_delete and col_to_delete in df_main.columns:
+            df_main.drop(columns=[col_to_delete], inplace=True)
             try:
-                st.session_state["main_timeline_data"].to_excel(DATA_FILE, index=False)
+                df_main.to_excel(DATA_FILE, index=False)
                 st.sidebar.success(f"Column '{col_to_delete}' deleted and saved.")
-                st.session_state["main_timeline_data"] = load_timeline_data(DATA_FILE)
+                load_timeline_data.clear()
+                df_main = load_timeline_data(DATA_FILE)
             except Exception as e:
                 st.sidebar.error(f"Error saving data: {e}")
         else:
@@ -140,54 +143,51 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
 
 # Configure columns for st.data_editor in the main timeline
 column_config_main = {}
-# (Existing specific configurations remain the same)
-if "Activity" in st.session_state["main_timeline_data"].columns:
+if "Activity" in df_main.columns:
     column_config_main["Activity"] = st.column_config.SelectboxColumn(
-        "Activity", options=sorted(st.session_state["main_timeline_data"]["Activity"].dropna().unique()), help="Activity"
+        "Activity", options=sorted(df_main["Activity"].dropna().unique()), help="Activity"
     )
-if "Item" in st.session_state["main_timeline_data"].columns:
+if "Item" in df_main.columns:
     column_config_main["Item"] = st.column_config.SelectboxColumn(
-        "Item", options=sorted(st.session_state["main_timeline_data"]["Item"].dropna().unique()), help="Item"
+        "Item", options=sorted(df_main["Item"].dropna().unique()), help="Item"
     )
-if "Task" in st.session_state["main_timeline_data"].columns:
+if "Task" in df_main.columns:
     column_config_main["Task"] = st.column_config.SelectboxColumn(
-        "Task", options=sorted(st.session_state["main_timeline_data"]["Task"].dropna().unique()), help="Task"
+        "Task", options=sorted(df_main["Task"].dropna().unique()), help="Task"
     )
-if "Room" in st.session_state["main_timeline_data"].columns:
+if "Room" in df_main.columns:
     column_config_main["Room"] = st.column_config.SelectboxColumn(
-        "Room", options=sorted(st.session_state["main_timeline_data"]["Room"].dropna().unique()), help="Room"
+        "Room", options=sorted(df_main["Room"].dropna().unique()), help="Room"
     )
-if "Status" in st.session_state["main_timeline_data"].columns:
+if "Status" in df_main.columns:
     column_config_main["Status"] = st.column_config.SelectboxColumn(
         "Status", options=["Finished", "In Progress", "Not Started"], help="Status"
     )
-if "Progress" in st.session_state["main_timeline_data"].columns:
+if "Progress" in df_main.columns:
     column_config_main["Progress"] = st.column_config.NumberColumn(
         "Progress", min_value=0, max_value=100, step=1, help="Progress %"
     )
 
-# Display the editable data using a key so it is stored in session state.
+# Edit the main timeline
 edited_df_main = st.data_editor(
-    st.session_state["main_timeline_data"],
+    df_main,
     column_config=column_config_main,
     use_container_width=True,
-    num_rows="dynamic",
-    key="main_timeline_editor"
+    num_rows="dynamic"
 )
 
-# Auto-update: If any row’s Status is "Finished", set its Progress to 100.
+# Force "Status" to string once user is done editing
 if "Status" in edited_df_main.columns:
-    finished_mask = edited_df_main["Status"].str.lower() == "finished"
-    if finished_mask.any():
-        edited_df_main.loc[finished_mask, "Progress"] = 100
-        # Update session state so that the change is retained.
-        st.session_state["main_timeline_data"] = edited_df_main.copy()
+    edited_df_main["Status"] = edited_df_main["Status"].astype(str).fillna("Not Started")
 
+# --- Auto-update Progress when Status is Finished ---
 if st.button("Save Updates (Main Timeline)"):
+    # If Status is "Finished", update Progress to 100.
+    edited_df_main.loc[edited_df_main["Status"].str.lower() == "finished", "Progress"] = 100
     try:
         edited_df_main.to_excel(DATA_FILE, index=False)
         st.success("Main timeline data successfully saved!")
-        st.session_state["main_timeline_data"] = load_timeline_data(DATA_FILE)
+        load_timeline_data.clear()
     except Exception as e:
         st.error(f"Error saving main timeline: {e}")
 
@@ -202,20 +202,34 @@ def norm_unique(df_input: pd.DataFrame, col: str):
         return []
     return sorted(set(df_input[col].dropna().astype(str).str.lower().str.strip()))
 
-for filter_key in ["activity_filter", "item_filter", "task_filter", "room_filter", "status_filter"]:
-    if filter_key not in st.session_state:
-        st.session_state[filter_key] = []
+if "activity_filter" not in st.session_state:
+    st.session_state["activity_filter"] = []
+if "item_filter" not in st.session_state:
+    st.session_state["item_filter"] = []
+if "task_filter" not in st.session_state:
+    st.session_state["task_filter"] = []
+if "room_filter" not in st.session_state:
+    st.session_state["room_filter"] = []
+if "status_filter" not in st.session_state:
+    st.session_state["status_filter"] = []
 
+# --- Date Range: use a default computed once, but allow the widget to be edited ---
 default_date_range = (
     edited_df_main["Start Date"].min() if "Start Date" in edited_df_main.columns and not edited_df_main["Start Date"].isnull().all() else datetime.today(),
     edited_df_main["End Date"].max() if "End Date" in edited_df_main.columns and not edited_df_main["End Date"].isnull().all() else datetime.today()
 )
+# The date_input widget will manage its own state with key="date_range"
 selected_date_range = st.sidebar.date_input("Filter Date Range", value=default_date_range, key="date_range")
 
 if st.sidebar.button("Clear Filters (Main)"):
-    for key in ["activity_filter", "item_filter", "task_filter", "room_filter", "status_filter"]:
-        st.session_state[key] = []
+    st.session_state["activity_filter"] = []
+    st.session_state["item_filter"] = []
+    st.session_state["task_filter"] = []
+    st.session_state["room_filter"] = []
+    st.session_state["status_filter"] = []
+    # Do not reset the date_input default here so that the user can modify it as needed
 
+# Multi‐select filters
 a_opts = norm_unique(edited_df_main, "Activity")
 selected_activity_norm = st.sidebar.multiselect("Filter by Activity", options=a_opts,
     default=st.session_state["activity_filter"], key="activity_filter")
@@ -235,7 +249,7 @@ selected_statuses = st.sidebar.multiselect("Filter by Status", options=s_opts,
 show_finished = st.sidebar.checkbox("Show Finished Tasks", value=True)
 color_by_status = st.sidebar.checkbox("Color-code Gantt Chart by Status", value=True)
 
-st.sidebar.markdown("**Refine Gantt Grouping**")
+st.sidebar.markdown("*Refine Gantt Grouping*")
 group_by_room = st.sidebar.checkbox("Group by Room", value=False)
 group_by_item = st.sidebar.checkbox("Group by Item", value=False)
 group_by_task = st.sidebar.checkbox("Group by Task", value=False)
@@ -245,6 +259,7 @@ group_by_task = st.sidebar.checkbox("Group by Task", value=False)
 # =====================================================================
 df_filtered = edited_df_main.copy()
 
+# Force status to string
 if "Status" in df_filtered.columns:
     df_filtered["Status"] = df_filtered["Status"].astype(str).fillna("Not Started")
 
@@ -266,8 +281,9 @@ if selected_statuses:
 if not show_finished:
     df_filtered = df_filtered[~df_filtered["Status_norm"].isin(["finished"])]
 
+# Use the user‐selected date range from the date_input widget
 if "Start Date" in df_filtered.columns and "End Date" in df_filtered.columns:
-    srange, erange = selected_date_range
+    srange, erange = selected_date_range  # get the dates from the widget
     srange = pd.to_datetime(srange)
     erange = pd.to_datetime(erange)
     df_filtered = df_filtered[
@@ -286,8 +302,10 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
     missing = [c for c in needed if c not in df_input.columns]
     if missing:
         return px.scatter(title=f"Cannot build Gantt: missing {missing}")
+
     if df_input.empty:
         return px.scatter(title="No data to display for Gantt")
+
     group_cols = ["Activity"]
     if group_by_room and "Room" in df_input.columns:
         group_cols.append("Room")
@@ -295,8 +313,11 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
         group_cols.append("Item")
     if group_by_task and "Task" in df_input.columns:
         group_cols.append("Task")
+
     if not group_cols:
         return px.scatter(title="No group columns selected for Gantt")
+
+    # aggregator
     grouped = (
         df_input
         .groupby(group_cols, dropna=False)
@@ -314,24 +335,34 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
         "Progress": "AvgProgress",
         "Status": "AllStatuses"
     }, inplace=True)
+
     now = pd.Timestamp(datetime.today().date())
+
+    # Updated aggregated_status now accepts both start and end dates.
     def aggregated_status(st_list, avg_prog, start_dt, end_dt):
+        # treat unknown statuses as "Not Started"
         all_lower = [str(x).lower().strip() for x in st_list]
+        # If finished or 100% done
         if all(s == "finished" for s in all_lower) or avg_prog >= 100:
             return "Finished"
+        # If the end date is past and task is incomplete, mark as delayed
         if end_dt < now and avg_prog < 100:
             return "Delayed"
+        # Calculate total duration and a delay threshold (e.g., half the duration)
         total_duration = (end_dt - start_dt).total_seconds()
         if total_duration <= 0:
             total_duration = 1
         delay_threshold = start_dt + pd.Timedelta(seconds=total_duration * 0.5)
+        # If we are past the delay threshold and no progress, mark as delayed
         if now > delay_threshold and avg_prog == 0:
             return "Delayed"
+        # If marked as in progress but still 0% done, call it "Just Started"
         if "in progress" in all_lower:
             if avg_prog == 0:
                 return "Just Started"
             return "In Progress"
         return "Not Started"
+
     segments = []
     for _, row in grouped.iterrows():
         label = " | ".join(str(row[g]) for g in group_cols)
@@ -340,10 +371,12 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
         end = row["GroupEnd"]
         avgp = row["AvgProgress"]
         final_st = aggregated_status(st_list, avgp, start, end)
+
         if final_st == "In Progress" and 0 < avgp < 100:
             total_s = (end - start).total_seconds()
             done_s = total_s * (avgp / 100.0)
             done_end = start + pd.Timedelta(seconds=done_s)
+            # completed portion
             segments.append({
                 "Group Label": label,
                 "Start": start,
@@ -367,9 +400,11 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
                 "Display Status": final_st,
                 "Progress": f"{avgp:.0f}%"
             })
+
     gantt_df = pd.DataFrame(segments)
     if gantt_df.empty:
         return px.scatter(title="No data after grouping for Gantt")
+
     color_map = {
         "Not Started": "lightgray",
         "Just Started": "lightgreen",
@@ -397,12 +432,16 @@ gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status)
 # 6. KPI & CALCULATIONS
 # =====================================================================
 total_tasks = len(edited_df_main)
+
+# Force Status string once more
 if "Status" in edited_df_main.columns:
     edited_df_main["Status"] = edited_df_main["Status"].astype(str).fillna("Not Started")
+
 finished_count = edited_df_main[edited_df_main["Status"].str.lower() == "finished"].shape[0]
 completion_pct = (finished_count / total_tasks * 100) if total_tasks else 0
 inprogress_count = edited_df_main[edited_df_main["Status"].str.lower() == "in progress"].shape[0]
 notstart_count = edited_df_main[edited_df_main["Status"].str.lower() == "not started"].shape[0]
+
 today_dt = pd.Timestamp(datetime.today().date())
 if "End Date" in df_filtered.columns:
     overdue_df = df_filtered[
@@ -413,11 +452,13 @@ if "End Date" in df_filtered.columns:
 else:
     overdue_df = pd.DataFrame()
     overdue_count = 0
+
 if "Activity" in df_filtered.columns:
     dist_table = df_filtered.groupby("Activity").size().reset_index(name="Task Count")
     dist_fig = px.bar(dist_table, x="Activity", y="Task Count", title="Task Distribution by Activity")
 else:
     dist_fig = px.bar(title="No 'Activity' column to show distribution.")
+
 if "Start Date" in df_filtered.columns:
     next7_df = df_filtered[
         (df_filtered["Start Date"] >= today_dt)
@@ -425,6 +466,7 @@ if "Start Date" in df_filtered.columns:
     ]
 else:
     next7_df = pd.DataFrame()
+
 filt_summ = []
 if selected_activity_norm:
     filt_summ.append("Activities: " + ", ".join(selected_activity_norm))
@@ -445,30 +487,39 @@ filt_text = "; ".join(filt_summ) if filt_summ else "No filters applied."
 # 7. DISPLAY MAIN TIMELINE DASHBOARD
 # =====================================================================
 st.header("Dashboard Overview (Main Timeline)")
+
 st.subheader("Current Tasks Snapshot")
 st.dataframe(df_filtered)
+
 st.subheader("Project Timeline")
 st.plotly_chart(gantt_fig, use_container_width=True)
+
 st.metric("Overall Completion (%)", f"{completion_pct:.1f}%")
 st.progress(completion_pct / 100)
+
 st.markdown("#### Additional Insights")
-st.markdown(f"**Overdue Tasks:** {overdue_count}")
+st.markdown(f"*Overdue Tasks:* {overdue_count}")
 if not overdue_df.empty:
     st.dataframe(overdue_df[["Activity", "Room", "Task", "Status", "End Date"]])
-st.markdown("**Task Distribution by Activity:**")
+
+st.markdown("*Task Distribution by Activity:*")
 st.plotly_chart(dist_fig, use_container_width=True)
-st.markdown("**Upcoming Tasks (Next 7 Days):**")
+
+st.markdown("*Upcoming Tasks (Next 7 Days):*")
 if not next7_df.empty:
     st.dataframe(next7_df[["Activity", "Room", "Task", "Start Date", "Status"]])
 else:
     st.info("No upcoming tasks in the next 7 days.")
-st.markdown("**Active Filters (Main Timeline):**")
+
+st.markdown("*Active Filters (Main Timeline):*")
 st.write(filt_text)
+
 mcol1, mcol2, mcol3, mcol4 = st.columns(4)
 mcol1.metric("Total Tasks", total_tasks)
 mcol2.metric("In Progress", inprogress_count)
 mcol3.metric("Finished", finished_count)
 mcol4.metric("Not Started", notstart_count)
+
 st.markdown("Use the filters on the sidebar to adjust the view.")
 st.markdown("---")
 
@@ -487,14 +538,20 @@ def load_items_data(file_path: str) -> pd.DataFrame:
 ITEMS_FILE = "Cleaned_Items_Table.csv"
 st.header("Items to Order")
 df_items = load_items_data(ITEMS_FILE)
+
+# Ensure all needed columns exist & correct dtypes
 for needed_col in ["Item", "Quantity", "Order Status", "Delivery Status", "Notes"]:
     if needed_col not in df_items.columns:
         df_items[needed_col] = ""
+
+# Force dtypes
 df_items["Item"] = df_items["Item"].astype(str)
 df_items["Quantity"] = pd.to_numeric(df_items["Quantity"], errors="coerce").fillna(0).astype(int)
 df_items["Order Status"] = df_items["Order Status"].astype(str)
 df_items["Delivery Status"] = df_items["Delivery Status"].astype(str)
 df_items["Notes"] = df_items["Notes"].astype(str)
+
+# Configure columns for Items
 items_col_config = {}
 items_col_config["Item"] = st.column_config.TextColumn(
     "Item",
@@ -506,11 +563,13 @@ items_col_config["Quantity"] = st.column_config.NumberColumn(
     step=1,
     help="Enter the quantity required."
 )
+# Remove "Delayed" from Order Status options.
 items_col_config["Order Status"] = st.column_config.SelectboxColumn(
     "Order Status",
     options=["Ordered", "Not Ordered"],
     help="Choose if this item is ordered or not ordered."
 )
+# Add "Delayed" option to Delivery Status.
 items_col_config["Delivery Status"] = st.column_config.SelectboxColumn(
     "Delivery Status",
     options=["Delivered", "Not Delivered", "Delayed"],
@@ -520,12 +579,14 @@ items_col_config["Notes"] = st.column_config.TextColumn(
     "Notes",
     help="Type any notes or remarks here."
 )
+
 edited_df_items = st.data_editor(
     df_items,
     column_config=items_col_config,
     use_container_width=True,
     num_rows="dynamic"
 )
+
 if st.button("Save Items Table"):
     try:
         edited_df_items["Quantity"] = pd.to_numeric(edited_df_items["Quantity"], errors="coerce").fillna(0).astype(int)
@@ -534,6 +595,8 @@ if st.button("Save Items Table"):
         load_items_data.clear()
     except Exception as e:
         st.error(f"Error saving items table: {e}")
+
+# Download button for the items table
 csv_buffer = io.StringIO()
 edited_df_items.to_csv(csv_buffer, index=False)
 st.download_button(
