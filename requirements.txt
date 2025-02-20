@@ -5,3 +5,4 @@ openpyxl
 xlsxwriter
 python-docx
 sqlalchemy
+psycopg2
