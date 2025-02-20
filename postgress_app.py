@@ -31,8 +31,6 @@ st.markdown(hide_stdataeditor_bug_tooltip, unsafe_allow_html=True)
 # ---------------------------------------------------------------------
 # POSTGRESQL SETUP
 # ---------------------------------------------------------------------
-# If your Streamlit version does not support st.cache_resource,
-# use st.cache(allow_output_mutation=True) instead.
 @st.cache_resource
 def get_sql_engine():
     connection_string = st.secrets["postgresql"]["connection_string"]
@@ -79,7 +77,6 @@ def load_timeline_data_sql() -> pd.DataFrame:
 
     # Convert progress to numeric
     df["progress"] = pd.to_numeric(df["progress"], errors="coerce").fillna(0)
-
     # Convert status to string
     df["status"] = df["status"].astype(str).fillna("Not Started")
 
@@ -88,7 +85,6 @@ def load_timeline_data_sql() -> pd.DataFrame:
 def save_timeline_data_sql(df: pd.DataFrame):
     """Save the timeline DataFrame back to PostgreSQL."""
     try:
-        # Overwrite the entire table with new data.
         df.to_sql(TIMELINE_TABLE, engine, if_exists="replace", index=False)
         st.sidebar.success("Timeline data saved to PostgreSQL successfully!")
     except Exception as e:
@@ -250,6 +246,9 @@ def norm_unique(df_input: pd.DataFrame, col: str):
 # We'll store filter selections in session_state
 if "activity_filter" not in st.session_state:
     st.session_state["activity_filter"] = []
+# NEW: Add item_filter for "Filter by Item"
+if "item_filter" not in st.session_state:
+    st.session_state["item_filter"] = []
 if "task_filter" not in st.session_state:
     st.session_state["task_filter"] = []
 if "room_filter" not in st.session_state:
@@ -268,12 +267,14 @@ selected_date_range = st.sidebar.date_input("Filter Date Range", value=default_d
 
 if st.sidebar.button("Clear Filters (Main)"):
     st.session_state["activity_filter"] = []
+    st.session_state["item_filter"] = []
     st.session_state["task_filter"] = []
     st.session_state["room_filter"] = []
     st.session_state["location_filter"] = []
     st.session_state["status_filter"] = []
 
 # Multi-select filters
+# 1. Activity
 if "activity" in edited_df_main.columns:
     a_opts = norm_unique(edited_df_main, "activity")
     selected_activity_norm = st.sidebar.multiselect(
@@ -283,6 +284,17 @@ if "activity" in edited_df_main.columns:
 else:
     selected_activity_norm = []
 
+# 2. Item (comes right after Activity, as requested)
+if "item" in edited_df_main.columns:
+    i_opts = norm_unique(edited_df_main, "item")
+    selected_item_norm = st.sidebar.multiselect(
+        "Filter by Item", options=i_opts,
+        default=st.session_state["item_filter"], key="item_filter"
+    )
+else:
+    selected_item_norm = []
+
+# 3. Task
 if "task" in edited_df_main.columns:
     t_opts = norm_unique(edited_df_main, "task")
     selected_task_norm = st.sidebar.multiselect(
@@ -292,6 +304,7 @@ if "task" in edited_df_main.columns:
 else:
     selected_task_norm = []
 
+# 4. Room
 if "room" in edited_df_main.columns:
     r_opts = norm_unique(edited_df_main, "room")
     selected_room_norm = st.sidebar.multiselect(
@@ -301,6 +314,7 @@ if "room" in edited_df_main.columns:
 else:
     selected_room_norm = []
 
+# 5. Location
 if "location" in edited_df_main.columns:
     loc_opts = norm_unique(edited_df_main, "location")
     selected_location_norm = st.sidebar.multiselect(
@@ -310,6 +324,7 @@ if "location" in edited_df_main.columns:
 else:
     selected_location_norm = []
 
+# 6. Status
 if "status" in edited_df_main.columns:
     s_opts = norm_unique(edited_df_main, "status")
     selected_statuses = st.sidebar.multiselect(
@@ -331,13 +346,19 @@ group_by_location = st.sidebar.checkbox("Group by Location", value=False)
 df_filtered = edited_df_main.copy()
 
 # Create "normalized" columns for filtering
-for col in ["activity", "task", "room", "location", "status"]:
+# Now we also include "item" in the list so we can filter by it
+for col in ["activity", "item", "task", "room", "location", "status"]:
     if col in df_filtered.columns:
         df_filtered[col + "_norm"] = df_filtered[col].astype(str).str.lower().str.strip()
 
 # Apply filters
 if selected_activity_norm and "activity_norm" in df_filtered.columns:
     df_filtered = df_filtered[df_filtered["activity_norm"].isin(selected_activity_norm)]
+
+# Filter by item
+if selected_item_norm and "item_norm" in df_filtered.columns:
+    df_filtered = df_filtered[df_filtered["item_norm"].isin(selected_item_norm)]
+
 if selected_task_norm and "task_norm" in df_filtered.columns:
     df_filtered = df_filtered[df_filtered["task_norm"].isin(selected_task_norm)]
 if selected_room_norm and "room_norm" in df_filtered.columns:
@@ -379,7 +400,6 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
     if df_input.empty:
         return px.scatter(title="No data to display for Gantt")
 
-    # Build group_cols based on user checkboxes
     group_cols = []
     if "activity" in df_input.columns:
         group_cols.append("activity")
@@ -391,13 +411,8 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
         group_cols.append("location")
 
     if not group_cols:
-        # If user didn't select anything, just group by the entire table
-        group_cols = ["activity"] if "activity" in df_input.columns else []
-
-    if not group_cols:
         return px.scatter(title="No valid columns to group by for Gantt")
 
-    # Aggregate
     grouped = (
         df_input
         .groupby(group_cols, dropna=False)
@@ -410,7 +425,6 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
         .reset_index()
     )
 
-    # Rename for clarity
     grouped.rename(columns={
         "start_date": "group_start",
         "end_date": "group_end",
@@ -421,16 +435,11 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
     now = pd.Timestamp(datetime.today().date())
 
     def aggregated_status(st_list, avg_prog, start_dt, end_dt):
-        """
-        Derive a single aggregated status from multiple tasks' statuses in a group.
-        Adjust logic as needed for your own definitions of "Delayed", etc.
-        """
         all_lower = [str(x).lower().strip() for x in st_list]
         if all(s == "finished" for s in all_lower) or avg_prog >= 100:
             return "Finished"
         if end_dt < now and avg_prog < 100:
             return "Delayed"
-        # If half the duration has passed and no progress => Delayed
         total_duration = (end_dt - start_dt).total_seconds() or 1
         delay_threshold = start_dt + pd.Timedelta(seconds=total_duration * 0.5)
         if now > delay_threshold and avg_prog == 0:
@@ -454,7 +463,6 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
         avgp = row["avg_progress"]
         final_st = aggregated_status(st_list, avgp, start, end)
 
-        # If "In Progress" and partial progress, split into two segments
         if final_st == "In Progress" and 0 < avgp < 100:
             total_s = (end - start).total_seconds()
             done_s = total_s * (avgp / 100.0)
@@ -514,8 +522,6 @@ gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status)
 # 6. KPI & CALCULATIONS
 # ---------------------------------------------------------------------
 total_tasks = len(edited_df_main)
-
-# If there's a 'status' column, unify it
 if "status" in edited_df_main.columns:
     edited_df_main["status"] = edited_df_main["status"].astype(str).fillna("Not Started")
 
@@ -535,14 +541,13 @@ else:
     overdue_df = pd.DataFrame()
     overdue_count = 0
 
-# Example distribution by "activity" (if you prefer another column, adjust below)
+# Example distribution by "activity"
 if "activity" in df_filtered.columns:
     dist_table = df_filtered.groupby("activity").size().reset_index(name="Task Count")
     dist_fig = px.bar(dist_table, x="activity", y="Task Count", title="Task Distribution by Activity")
 else:
     dist_fig = px.bar(title="No 'activity' column to show distribution.")
 
-# Next 7 days upcoming tasks
 if "start_date" in df_filtered.columns:
     next7_df = df_filtered[
         (df_filtered["start_date"] >= today_dt)
@@ -551,10 +556,11 @@ if "start_date" in df_filtered.columns:
 else:
     next7_df = pd.DataFrame()
 
-# Filter summary for display
 filt_summ = []
 if selected_activity_norm:
     filt_summ.append("Activities: " + ", ".join(selected_activity_norm))
+if selected_item_norm:
+    filt_summ.append("Items: " + ", ".join(selected_item_norm))
 if selected_task_norm:
     filt_summ.append("Tasks: " + ", ".join(selected_task_norm))
 if selected_room_norm:
@@ -647,11 +653,13 @@ edited_df_items = st.data_editor(
     num_rows="dynamic"
 )
 
+# Only removed "load_items_data_sql.clear()" to avoid the double-click issue.
 if st.button("Save Items Table"):
     try:
         edited_df_items["quantity"] = pd.to_numeric(edited_df_items["quantity"], errors="coerce").fillna(0).astype(int)
         save_items_data_sql(edited_df_items)
-        load_items_data_sql.clear()
+        st.success("Items table successfully saved to PostgreSQL!")
+        # No forced reload -> avoids the double-click add/delete glitch
     except Exception as e:
         st.error(f"Error saving items table: {e}")
 
