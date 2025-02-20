@@ -48,8 +48,8 @@ ITEMS_TABLE = "cleaned_items"
 def load_timeline_data_sql() -> pd.DataFrame:
     """
     Load the main timeline DataFrame from PostgreSQL.
-    Expects columns: activity, task, room, location, start_date, end_date, status
-    We'll also add a 'progress' column if it doesn't exist.
+    Expects columns: activity, task, room, location, start_date, end_date, status.
+    Adds a 'progress' column if missing.
     """
     try:
         df = pd.read_sql(f"SELECT * FROM {TIMELINE_TABLE}", engine)
@@ -83,7 +83,7 @@ def save_timeline_data_sql(df: pd.DataFrame):
 def load_items_data_sql() -> pd.DataFrame:
     """
     Load the 'Items to Order' DataFrame from PostgreSQL.
-    Expects columns: item, quantity, order_status, delivery_status, notes
+    Expects columns: item, quantity, order_status, delivery_status, notes.
     """
     try:
         df_i = pd.read_sql(f"SELECT * FROM {ITEMS_TABLE}", engine)
@@ -158,13 +158,15 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
         else:
             st.sidebar.warning("Please select a valid column.")
 
-# Use TextColumn for free text entry with suggestions
+# Configure columns for st.data_editor in the main timeline.
+# For columns where free-text entry is allowed with suggestions,
+# we use TextColumn and include suggestions in the help text.
 column_config_main = {}
 for col in ["activity", "item", "task", "room", "location"]:
     if col in df_main.columns:
-        placeholder = ", ".join(sorted(df_main[col].dropna().unique()))
+        suggestions = ", ".join(sorted(df_main[col].dropna().unique()))
         column_config_main[col] = st.column_config.TextColumn(
-            col, placeholder=placeholder, help=f"{col.capitalize()} (type new value if needed)"
+            col, help=f"{col.capitalize()} (Suggestions: {suggestions}). Type new value if needed."
         )
 if "status" in df_main.columns:
     column_config_main["status"] = st.column_config.SelectboxColumn(
@@ -192,7 +194,7 @@ if st.button("Save Updates (Main Timeline)"):
     try:
         save_timeline_data_sql(edited_df_main)
         st.success("Main timeline data successfully saved!")
-        st.experimental_rerun()  # Refresh the page so new data is reloaded in snapshot & Gantt chart
+        st.experimental_rerun()  # Refresh page to load latest data in snapshot & Gantt chart
     except Exception as e:
         st.error(f"Error saving main timeline: {e}")
 
@@ -321,7 +323,7 @@ df_filtered.drop(columns=normcols, inplace=True, errors="ignore")
 def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
     """
     Build a Gantt chart using columns: start_date, end_date, status, progress.
-    We'll group by activity + optional user checkboxes (room, task, location).
+    We'll group by activity plus optional checkboxes (room, task, location).
     """
     needed = ["start_date", "end_date", "status", "progress"]
     missing = [c for c in needed if c not in df_input.columns]
@@ -538,7 +540,7 @@ items_col_config = {}
 if "item" in df_items.columns:
     placeholder = ", ".join(sorted(df_items["item"].dropna().unique()))
     items_col_config["item"] = st.column_config.TextColumn(
-        "item", placeholder=placeholder, help="Name of the item (type new value if needed)"
+        "item", help=f"Name of the item (Suggestions: {placeholder}). Type new value if needed."
     )
 items_col_config["quantity"] = st.column_config.NumberColumn("quantity", min_value=0, step=1, help="Enter the quantity required.")
 items_col_config["order_status"] = st.column_config.SelectboxColumn(
