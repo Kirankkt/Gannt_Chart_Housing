@@ -75,9 +75,8 @@ def load_timeline_data_sql() -> pd.DataFrame:
     if "status" not in df.columns:
         df["status"] = "Not Started"
 
-    # Convert progress to numeric
+    # Convert progress to numeric and status to string
     df["progress"] = pd.to_numeric(df["progress"], errors="coerce").fillna(0)
-    # Convert status to string
     df["status"] = df["status"].astype(str).fillna("Not Started")
 
     return df
@@ -99,12 +98,9 @@ def load_items_data_sql() -> pd.DataFrame:
     try:
         df_i = pd.read_sql(f"SELECT * FROM {ITEMS_TABLE}", engine)
     except Exception:
-        # If table does not exist, create an empty DataFrame with the correct columns.
         df_i = pd.DataFrame(columns=["item", "quantity", "order_status", "delivery_status", "notes"])
 
-    # Lowercase column names just in case
     df_i.columns = df_i.columns.str.lower().str.strip()
-
     return df_i
 
 def save_items_data_sql(df: pd.DataFrame):
@@ -175,32 +171,37 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
         else:
             st.sidebar.warning("Please select a valid column.")
 
-# Configure columns for st.data_editor in the main timeline
-# We'll match the columns that exist in your DB: activity, item, task, room, location, start_date, end_date, status, progress
+# Configure columns for st.data_editor in the main timeline.
+# For free-text entry with suggestions, we use TextColumn with a placeholder.
 column_config_main = {}
 
 if "activity" in df_main.columns:
-    column_config_main["activity"] = st.column_config.SelectboxColumn(
-        "activity", options=sorted(df_main["activity"].dropna().unique()), help="Activity"
+    placeholder = ", ".join(sorted(df_main["activity"].dropna().unique()))
+    column_config_main["activity"] = st.column_config.TextColumn(
+        "activity", placeholder=placeholder, help="Activity (type new value if needed)"
     )
-# NEW: Provide a prompt for "item" if it exists
 if "item" in df_main.columns:
-    column_config_main["item"] = st.column_config.SelectboxColumn(
-        "item", options=sorted(df_main["item"].dropna().unique()), help="Item"
+    placeholder = ", ".join(sorted(df_main["item"].dropna().unique()))
+    column_config_main["item"] = st.column_config.TextColumn(
+        "item", placeholder=placeholder, help="Item (type new value if needed)"
     )
 if "task" in df_main.columns:
-    column_config_main["task"] = st.column_config.SelectboxColumn(
-        "task", options=sorted(df_main["task"].dropna().unique()), help="Task"
+    placeholder = ", ".join(sorted(df_main["task"].dropna().unique()))
+    column_config_main["task"] = st.column_config.TextColumn(
+        "task", placeholder=placeholder, help="Task (type new value if needed)"
     )
 if "room" in df_main.columns:
-    column_config_main["room"] = st.column_config.SelectboxColumn(
-        "room", options=sorted(df_main["room"].dropna().unique()), help="Room"
+    placeholder = ", ".join(sorted(df_main["room"].dropna().unique()))
+    column_config_main["room"] = st.column_config.TextColumn(
+        "room", placeholder=placeholder, help="Room (type new value if needed)"
     )
 if "location" in df_main.columns:
-    column_config_main["location"] = st.column_config.SelectboxColumn(
-        "location", options=sorted(df_main["location"].dropna().unique()), help="Location"
+    placeholder = ", ".join(sorted(df_main["location"].dropna().unique()))
+    column_config_main["location"] = st.column_config.TextColumn(
+        "location", placeholder=placeholder, help="Location (type new value if needed)"
     )
 if "status" in df_main.columns:
+    # Keep status as a selectbox to constrain choices
     column_config_main["status"] = st.column_config.SelectboxColumn(
         "status", options=["Finished", "In Progress", "Not Started"], help="Status"
     )
@@ -268,7 +269,6 @@ if st.sidebar.button("Clear Filters (Main)"):
     st.session_state["location_filter"] = []
     st.session_state["status_filter"] = []
 
-# Multi-select filters
 if "activity" in edited_df_main.columns:
     a_opts = norm_unique(edited_df_main, "activity")
     selected_activity_norm = st.sidebar.multiselect(
@@ -333,7 +333,6 @@ group_by_location = st.sidebar.checkbox("Group by Location", value=False)
 
 df_filtered = edited_df_main.copy()
 
-# Create "normalized" columns for filtering
 for col in ["activity", "item", "task", "room", "location", "status"]:
     if col in df_filtered.columns:
         df_filtered[col + "_norm"] = df_filtered[col].astype(str).str.lower().str.strip()
@@ -600,7 +599,6 @@ st.markdown("---")
 st.header("Items to Order")
 df_items = load_items_data_sql()
 
-# Ensure columns exist
 for needed_col in ["item", "quantity", "order_status", "delivery_status", "notes"]:
     if needed_col not in df_items.columns:
         df_items[needed_col] = ""
@@ -612,12 +610,12 @@ df_items["delivery_status"] = df_items["delivery_status"].astype(str)
 df_items["notes"] = df_items["notes"].astype(str)
 
 items_col_config = {}
-# NEW: Provide a prompt for "item" in Items to Order
-items_col_config["item"] = st.column_config.SelectboxColumn(
-    "item",
-    options=sorted(df_items["item"].dropna().unique()),
-    help="Name of the item"
-)
+# For "item" in Items to Order, use TextColumn with placeholder for suggestions.
+if "item" in df_items.columns:
+    placeholder = ", ".join(sorted(df_items["item"].dropna().unique()))
+    items_col_config["item"] = st.column_config.TextColumn(
+        "item", placeholder=placeholder, help="Name of the item (type new value if needed)"
+    )
 items_col_config["quantity"] = st.column_config.NumberColumn("quantity", min_value=0, step=1, help="Enter the quantity required.")
 items_col_config["order_status"] = st.column_config.SelectboxColumn(
     "order_status",
