@@ -135,7 +135,6 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
                 df_main.drop(df_main.index[idx], inplace=True)
                 save_timeline_data_sql(df_main)
                 st.sidebar.success(f"Row {idx} deleted and saved.")
-                # Removed the forced reload to avoid the double-click glitch
             else:
                 st.sidebar.error("Invalid index.")
         else:
@@ -157,7 +156,6 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
                 df_main[new_col_name] = pd.NaT
             save_timeline_data_sql(df_main)
             st.sidebar.success(f"Column '{new_col_name}' added and saved.")
-            # Removed the forced reload
         elif new_col_name in df_main.columns:
             st.sidebar.warning("Column already exists or invalid name.")
         else:
@@ -174,17 +172,21 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
             df_main.drop(columns=[col_to_delete], inplace=True)
             save_timeline_data_sql(df_main)
             st.sidebar.success(f"Column '{col_to_delete}' deleted and saved.")
-            # Removed the forced reload
         else:
             st.sidebar.warning("Please select a valid column.")
 
 # Configure columns for st.data_editor in the main timeline
-# We'll match the columns that exist in your DB: activity, task, room, location, start_date, end_date, status, progress
+# We'll match the columns that exist in your DB: activity, item, task, room, location, start_date, end_date, status, progress
 column_config_main = {}
 
 if "activity" in df_main.columns:
     column_config_main["activity"] = st.column_config.SelectboxColumn(
         "activity", options=sorted(df_main["activity"].dropna().unique()), help="Activity"
+    )
+# NEW: Provide a prompt for "item" if it exists
+if "item" in df_main.columns:
+    column_config_main["item"] = st.column_config.SelectboxColumn(
+        "item", options=sorted(df_main["item"].dropna().unique()), help="Item"
     )
 if "task" in df_main.columns:
     column_config_main["task"] = st.column_config.SelectboxColumn(
@@ -225,7 +227,6 @@ if st.button("Save Updates (Main Timeline)"):
     try:
         save_timeline_data_sql(edited_df_main)
         st.success("Main timeline data successfully saved!")
-        # Removed load_timeline_data_sql.clear() -> fixes the double-click glitch
     except Exception as e:
         st.error(f"Error saving main timeline: {e}")
 
@@ -611,7 +612,12 @@ df_items["delivery_status"] = df_items["delivery_status"].astype(str)
 df_items["notes"] = df_items["notes"].astype(str)
 
 items_col_config = {}
-items_col_config["item"] = st.column_config.TextColumn("item", help="Name of the item")
+# NEW: Provide a prompt for "item" in Items to Order
+items_col_config["item"] = st.column_config.SelectboxColumn(
+    "item",
+    options=sorted(df_items["item"].dropna().unique()),
+    help="Name of the item"
+)
 items_col_config["quantity"] = st.column_config.NumberColumn("quantity", min_value=0, step=1, help="Enter the quantity required.")
 items_col_config["order_status"] = st.column_config.SelectboxColumn(
     "order_status",
