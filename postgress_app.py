@@ -135,8 +135,7 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
                 df_main.drop(df_main.index[idx], inplace=True)
                 save_timeline_data_sql(df_main)
                 st.sidebar.success(f"Row {idx} deleted and saved.")
-                load_timeline_data_sql.clear()
-                df_main = load_timeline_data_sql()
+                # Removed the forced reload to avoid the double-click glitch
             else:
                 st.sidebar.error("Invalid index.")
         else:
@@ -158,8 +157,7 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
                 df_main[new_col_name] = pd.NaT
             save_timeline_data_sql(df_main)
             st.sidebar.success(f"Column '{new_col_name}' added and saved.")
-            load_timeline_data_sql.clear()
-            df_main = load_timeline_data_sql()
+            # Removed the forced reload
         elif new_col_name in df_main.columns:
             st.sidebar.warning("Column already exists or invalid name.")
         else:
@@ -176,8 +174,7 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
             df_main.drop(columns=[col_to_delete], inplace=True)
             save_timeline_data_sql(df_main)
             st.sidebar.success(f"Column '{col_to_delete}' deleted and saved.")
-            load_timeline_data_sql.clear()
-            df_main = load_timeline_data_sql()
+            # Removed the forced reload
         else:
             st.sidebar.warning("Please select a valid column.")
 
@@ -228,7 +225,7 @@ if st.button("Save Updates (Main Timeline)"):
     try:
         save_timeline_data_sql(edited_df_main)
         st.success("Main timeline data successfully saved!")
-        load_timeline_data_sql.clear()
+        # Removed load_timeline_data_sql.clear() -> fixes the double-click glitch
     except Exception as e:
         st.error(f"Error saving main timeline: {e}")
 
@@ -243,10 +240,8 @@ def norm_unique(df_input: pd.DataFrame, col: str):
         return []
     return sorted(set(df_input[col].dropna().astype(str).str.lower().str.strip()))
 
-# We'll store filter selections in session_state
 if "activity_filter" not in st.session_state:
     st.session_state["activity_filter"] = []
-# NEW: Add item_filter for "Filter by Item"
 if "item_filter" not in st.session_state:
     st.session_state["item_filter"] = []
 if "task_filter" not in st.session_state:
@@ -258,7 +253,6 @@ if "location_filter" not in st.session_state:
 if "status_filter" not in st.session_state:
     st.session_state["status_filter"] = []
 
-# Date range filter
 default_date_range = (
     edited_df_main["start_date"].min() if "start_date" in edited_df_main.columns and not edited_df_main["start_date"].isnull().all() else datetime.today(),
     edited_df_main["end_date"].max() if "end_date" in edited_df_main.columns and not edited_df_main["end_date"].isnull().all() else datetime.today()
@@ -274,7 +268,6 @@ if st.sidebar.button("Clear Filters (Main)"):
     st.session_state["status_filter"] = []
 
 # Multi-select filters
-# 1. Activity
 if "activity" in edited_df_main.columns:
     a_opts = norm_unique(edited_df_main, "activity")
     selected_activity_norm = st.sidebar.multiselect(
@@ -284,7 +277,6 @@ if "activity" in edited_df_main.columns:
 else:
     selected_activity_norm = []
 
-# 2. Item (comes right after Activity, as requested)
 if "item" in edited_df_main.columns:
     i_opts = norm_unique(edited_df_main, "item")
     selected_item_norm = st.sidebar.multiselect(
@@ -294,7 +286,6 @@ if "item" in edited_df_main.columns:
 else:
     selected_item_norm = []
 
-# 3. Task
 if "task" in edited_df_main.columns:
     t_opts = norm_unique(edited_df_main, "task")
     selected_task_norm = st.sidebar.multiselect(
@@ -304,7 +295,6 @@ if "task" in edited_df_main.columns:
 else:
     selected_task_norm = []
 
-# 4. Room
 if "room" in edited_df_main.columns:
     r_opts = norm_unique(edited_df_main, "room")
     selected_room_norm = st.sidebar.multiselect(
@@ -314,7 +304,6 @@ if "room" in edited_df_main.columns:
 else:
     selected_room_norm = []
 
-# 5. Location
 if "location" in edited_df_main.columns:
     loc_opts = norm_unique(edited_df_main, "location")
     selected_location_norm = st.sidebar.multiselect(
@@ -324,7 +313,6 @@ if "location" in edited_df_main.columns:
 else:
     selected_location_norm = []
 
-# 6. Status
 if "status" in edited_df_main.columns:
     s_opts = norm_unique(edited_df_main, "status")
     selected_statuses = st.sidebar.multiselect(
@@ -337,7 +325,6 @@ else:
 show_finished = st.sidebar.checkbox("Show Finished Tasks", value=True)
 color_by_status = st.sidebar.checkbox("Color-code Gantt Chart by Status", value=True)
 
-# Gantt grouping
 st.sidebar.markdown("*Refine Gantt Grouping*")
 group_by_room = st.sidebar.checkbox("Group by Room", value=False)
 group_by_task = st.sidebar.checkbox("Group by Task", value=False)
@@ -346,19 +333,14 @@ group_by_location = st.sidebar.checkbox("Group by Location", value=False)
 df_filtered = edited_df_main.copy()
 
 # Create "normalized" columns for filtering
-# Now we also include "item" in the list so we can filter by it
 for col in ["activity", "item", "task", "room", "location", "status"]:
     if col in df_filtered.columns:
         df_filtered[col + "_norm"] = df_filtered[col].astype(str).str.lower().str.strip()
 
-# Apply filters
 if selected_activity_norm and "activity_norm" in df_filtered.columns:
     df_filtered = df_filtered[df_filtered["activity_norm"].isin(selected_activity_norm)]
-
-# Filter by item
 if selected_item_norm and "item_norm" in df_filtered.columns:
     df_filtered = df_filtered[df_filtered["item_norm"].isin(selected_item_norm)]
-
 if selected_task_norm and "task_norm" in df_filtered.columns:
     df_filtered = df_filtered[df_filtered["task_norm"].isin(selected_task_norm)]
 if selected_room_norm and "room_norm" in df_filtered.columns:
@@ -371,7 +353,6 @@ if selected_statuses and "status_norm" in df_filtered.columns:
 if not show_finished and "status_norm" in df_filtered.columns:
     df_filtered = df_filtered[~df_filtered["status_norm"].isin(["finished"])]
 
-# Date filter
 if "start_date" in df_filtered.columns and "end_date" in df_filtered.columns:
     srange, erange = selected_date_range
     srange = pd.to_datetime(srange)
@@ -381,7 +362,6 @@ if "start_date" in df_filtered.columns and "end_date" in df_filtered.columns:
         (df_filtered["end_date"] <= erange)
     ]
 
-# Remove the _norm columns after filtering
 normcols = [c for c in df_filtered.columns if c.endswith("_norm")]
 df_filtered.drop(columns=normcols, inplace=True, errors="ignore")
 
@@ -541,7 +521,6 @@ else:
     overdue_df = pd.DataFrame()
     overdue_count = 0
 
-# Example distribution by "activity"
 if "activity" in df_filtered.columns:
     dist_table = df_filtered.groupby("activity").size().reset_index(name="Task Count")
     dist_fig = px.bar(dist_table, x="activity", y="Task Count", title="Task Distribution by Activity")
@@ -557,18 +536,18 @@ else:
     next7_df = pd.DataFrame()
 
 filt_summ = []
-if selected_activity_norm:
-    filt_summ.append("Activities: " + ", ".join(selected_activity_norm))
-if selected_item_norm:
-    filt_summ.append("Items: " + ", ".join(selected_item_norm))
-if selected_task_norm:
-    filt_summ.append("Tasks: " + ", ".join(selected_task_norm))
-if selected_room_norm:
-    filt_summ.append("Rooms: " + ", ".join(selected_room_norm))
-if selected_location_norm:
-    filt_summ.append("Locations: " + ", ".join(selected_location_norm))
-if selected_statuses:
-    filt_summ.append("Status: " + ", ".join(selected_statuses))
+if "activity_filter" in st.session_state and st.session_state["activity_filter"]:
+    filt_summ.append("Activities: " + ", ".join(st.session_state["activity_filter"]))
+if "item_filter" in st.session_state and st.session_state["item_filter"]:
+    filt_summ.append("Items: " + ", ".join(st.session_state["item_filter"]))
+if "task_filter" in st.session_state and st.session_state["task_filter"]:
+    filt_summ.append("Tasks: " + ", ".join(st.session_state["task_filter"]))
+if "room_filter" in st.session_state and st.session_state["room_filter"]:
+    filt_summ.append("Rooms: " + ", ".join(st.session_state["room_filter"]))
+if "location_filter" in st.session_state and st.session_state["location_filter"]:
+    filt_summ.append("Locations: " + ", ".join(st.session_state["location_filter"]))
+if "status_filter" in st.session_state and st.session_state["status_filter"]:
+    filt_summ.append("Status: " + ", ".join(st.session_state["status_filter"]))
 if selected_date_range:
     d0, d1 = selected_date_range
     filt_summ.append(f"Date Range: {d0} to {d1}")
@@ -653,13 +632,11 @@ edited_df_items = st.data_editor(
     num_rows="dynamic"
 )
 
-# Only removed "load_items_data_sql.clear()" to avoid the double-click issue.
 if st.button("Save Items Table"):
     try:
         edited_df_items["quantity"] = pd.to_numeric(edited_df_items["quantity"], errors="coerce").fillna(0).astype(int)
         save_items_data_sql(edited_df_items)
         st.success("Items table successfully saved to PostgreSQL!")
-        # No forced reload -> avoids the double-click add/delete glitch
     except Exception as e:
         st.error(f"Error saving items table: {e}")
 
