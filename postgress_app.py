@@ -31,7 +31,9 @@ st.markdown(hide_stdataeditor_bug_tooltip, unsafe_allow_html=True)
 # ---------------------------------------------------------------------
 # POSTGRESQL SETUP
 # ---------------------------------------------------------------------
-@st.experimental_singleton
+# Use st.cache_resource to cache the SQL engine.
+# (If your Streamlit version doesn't support st.cache_resource, you can use st.cache with allow_output_mutation=True.)
+@st.cache_resource
 def get_sql_engine():
     connection_string = st.secrets["postgresql"]["connection_string"]
     return create_engine(connection_string)
@@ -311,7 +313,7 @@ df_filtered.drop(columns=normcols, inplace=True, errors="ignore")
 # ---------------------------------------------------------------------
 def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
     needed = ["Start Date", "End Date", "Status", "Progress"]
-    missing = [c for c in needed if c not in df_input.columns]
+    missing = [c for c in df_input.columns if c not in df_input.columns]
     if missing:
         return px.scatter(title=f"Cannot build Gantt: missing {missing}")
     if df_input.empty:
