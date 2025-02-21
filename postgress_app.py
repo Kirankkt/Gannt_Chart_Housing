@@ -5,6 +5,9 @@ import io
 from datetime import datetime
 import psycopg2
 from sqlalchemy import create_engine, text
+import streamlit as st
+
+st.write(f"Streamlit version: {st.__version__}")
 
 # ---------------------------------------------------------------------
 # APP CONFIG & TITLE
