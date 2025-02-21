@@ -220,14 +220,25 @@ edited_df_main = st.data_editor(
 if "Status" in edited_df_main.columns:
     edited_df_main["Status"] = edited_df_main["Status"].astype(str).fillna("Not Started")
 
-# When saving, auto-update Progress for tasks marked Finished.
 if st.button("Save Updates (Main Timeline)"):
+    # Define a helper to normalize the status values
+    def normalize_status(x):
+        if pd.isna(x) or str(x).strip().lower() in ["", "na", "null", "none"]:
+            return "Not Started"
+        return x
+
+    # Apply the normalization function to the Status column
+    edited_df_main["Status"] = edited_df_main["Status"].apply(normalize_status)
+    
+    # Auto-update progress for tasks marked as finished
     edited_df_main.loc[edited_df_main["Status"].str.lower() == "finished", "Progress"] = 100
+    
     try:
         save_timeline_data(edited_df_main)
         st.success("Main timeline data successfully saved!")
     except Exception as e:
         st.error(f"Error saving main timeline: {e}")
+
 
 # ------------------------------------------------------------------------------
 # REFRESH BUTTON (using st.set_query_params)
