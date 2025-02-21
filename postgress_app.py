@@ -232,10 +232,20 @@ if st.button("Save Updates (Main Timeline)"):
 # ------------------------------------------------------------------------------
 # REFRESH BUTTON (using st.set_query_params)
 # ------------------------------------------------------------------------------
+# --- Instead of st.set_query_params(...) ---
 if st.button("Refresh Data (Main Timeline)"):
     load_timeline_data.clear()  # clear the cache
-    # Use query param trick to force a re-run
-    st.set_query_params(refresh=str(time.time()))
+    st.markdown(
+        """
+        <script>
+        var queryParams = new URLSearchParams(window.location.search);
+        queryParams.set("refresh", Date.now());
+        window.location.search = queryParams.toString();
+        </script>
+        """,
+        unsafe_allow_html=True
+    )
+
 
 # ------------------------------------------------------------------------------
 # 5. SIDEBAR FILTERS FOR MAIN TIMELINE & GANTT CHART
