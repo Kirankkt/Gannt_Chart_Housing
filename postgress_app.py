@@ -228,6 +228,11 @@ if st.button("Save Updates (Main Timeline)"):
     except Exception as e:
         st.error(f"Error saving main timeline: {e}")
 
+# --- Added Refresh Button ---
+if st.button("Refresh Data (Main Timeline)"):
+    load_timeline_data.clear()  # clear the cache
+    st.experimental_rerun()     # re-run the app to load fresh data
+
 # ------------------------------------------------------------------------------
 # 5. SIDEBAR FILTERS FOR MAIN TIMELINE & GANTT CHART
 # ------------------------------------------------------------------------------
