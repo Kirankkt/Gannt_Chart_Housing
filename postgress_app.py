@@ -42,7 +42,7 @@ def get_sql_engine():
 engine = get_sql_engine()
 
 # Table names
-MAIN_TIMELINE_TABLE = "construction_timeline"
+MAIN_TIMELINE_TABLE = "construction_timeline_3"
 ITEMS_TABLE = "cleaned_items"
 
 # =====================================================================
