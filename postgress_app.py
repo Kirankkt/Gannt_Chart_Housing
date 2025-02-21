@@ -220,21 +220,14 @@ edited_df_main = st.data_editor(
 if "Status" in edited_df_main.columns:
     edited_df_main["Status"] = edited_df_main["Status"].astype(str).fillna("Not Started")
 
-
-
-
+# When saving, auto-update Progress for tasks marked Finished.
 if st.button("Save Updates (Main Timeline)"):
-    # Replace blank status values with "Not Started"
-    edited_df_main["Status"] = edited_df_main["Status"].replace("", "Not Started")
-    # Auto-update progress for tasks marked as finished
     edited_df_main.loc[edited_df_main["Status"].str.lower() == "finished", "Progress"] = 100
     try:
         save_timeline_data(edited_df_main)
         st.success("Main timeline data successfully saved!")
     except Exception as e:
         st.error(f"Error saving main timeline: {e}")
-
-
 
 # ------------------------------------------------------------------------------
 # REFRESH BUTTON (using st.set_query_params)
@@ -641,5 +634,4 @@ st.download_button(
     file_name="Cleaned_Items_Table.csv",
     mime="text/csv"
 )
-
 
