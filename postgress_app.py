@@ -230,12 +230,12 @@ if st.button("Save Updates (Main Timeline)"):
         st.error(f"Error saving main timeline: {e}")
 
 # ------------------------------------------------------------------------------
-# REFRESH BUTTON WORKAROUND
+# REFRESH BUTTON (using st.set_query_params)
 # ------------------------------------------------------------------------------
 if st.button("Refresh Data (Main Timeline)"):
     load_timeline_data.clear()  # clear the cache
     # Use query param trick to force a re-run
-    st.experimental_set_query_params(refresh=str(time.time()))
+    st.set_query_params(refresh=str(time.time()))
 
 # ------------------------------------------------------------------------------
 # 5. SIDEBAR FILTERS FOR MAIN TIMELINE & GANTT CHART
