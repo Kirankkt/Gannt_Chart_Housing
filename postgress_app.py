@@ -613,14 +613,6 @@ if st.button("Save Items Table"):
     except Exception as e:
         st.error(f"Error saving items table: {e}")
 
-csv_buffer = io.StringIO()
-edited_df_items.to_csv(csv_buffer, index=False)
-st.download_button(
-    label="Download Items Table as CSV",
-    data=csv_buffer.getvalue(),
-    file_name="Cleaned_Items_Table.csv",
-    mime="text/csv"
-)
 if st.button("Refresh Items Table"):
     load_items_data.clear()  # clear the cache for items data
     st.markdown(
@@ -633,4 +625,14 @@ if st.button("Refresh Items Table"):
         """,
         unsafe_allow_html=True
     )
+
+csv_buffer = io.StringIO()
+edited_df_items.to_csv(csv_buffer, index=False)
+st.download_button(
+    label="Download Items Table as CSV",
+    data=csv_buffer.getvalue(),
+    file_name="Cleaned_Items_Table.csv",
+    mime="text/csv"
+)
+
 
