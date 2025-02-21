@@ -621,3 +621,16 @@ st.download_button(
     file_name="Cleaned_Items_Table.csv",
     mime="text/csv"
 )
+if st.button("Refresh Items Table"):
+    load_items_data.clear()  # clear the cache for items data
+    st.markdown(
+        """
+        <script>
+        var queryParams = new URLSearchParams(window.location.search);
+        queryParams.set("refresh", Date.now());
+        window.location.search = queryParams.toString();
+        </script>
+        """,
+        unsafe_allow_html=True
+    )
+
