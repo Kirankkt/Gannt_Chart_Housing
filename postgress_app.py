@@ -43,7 +43,7 @@ def get_sql_engine():
 engine = get_sql_engine()
 
 # Table names in Postgres
-MAIN_TIMELINE_TABLE = "construction_timeline"
+MAIN_TIMELINE_TABLE = "construction_timeline_2"
 ITEMS_TABLE = "items_to_order"
 
 # =====================================================================
