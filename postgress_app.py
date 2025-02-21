@@ -5,9 +5,6 @@ import io
 from datetime import datetime
 import psycopg2
 from sqlalchemy import create_engine, text
-import streamlit as st
-
-st.write(f"Streamlit version: {st.__version__}")
 
 # ---------------------------------------------------------------------
 # APP CONFIG & TITLE
@@ -24,7 +21,6 @@ st.markdown(
 # ---------------------------------------------------------------------
 hide_stdataeditor_bug_tooltip = """
 <style>
-/* Hide all tooltips within the data editor */
 [data-testid="stDataEditor"] [role="tooltip"] {
     visibility: hidden !important;
 }
@@ -38,10 +34,8 @@ st.markdown(hide_stdataeditor_bug_tooltip, unsafe_allow_html=True)
 @st.cache_resource
 def get_db_engine():
     """Create and return a SQLAlchemy engine using secrets.toml credentials."""
-    # Replace "postgres" with the key you used in secrets.toml
+    # Adjust the key as needed if your secrets.toml uses a different structure
     conn_data = st.secrets["postgres"]
-    # Example connection string:
-    # postgresql://user:password@host:port/database
     conn_str = (
         f"postgresql://{conn_data['user']}:{conn_data['password']}"
         f"@{conn_data['host']}:{conn_data['port']}/{conn_data['database']}"
@@ -55,19 +49,18 @@ engine = get_db_engine()
 # =====================================================================
 # 1. HELPER: LOAD MAIN TIMELINE DATA FROM POSTGRES
 # =====================================================================
-TIMELINE_TABLE = "construction_timeline_3"  # your table name in Postgres
+TIMELINE_TABLE = "construction_timeline_3"
+
 @st.cache_data
 def load_timeline_data() -> pd.DataFrame:
     """
-    Load or create the main timeline DataFrame from the Postgres table `construction_timeline_3`.
-    We then rename columns in-memory so they match the older Excel-based code logic.
-    Also ensure that 'Progress' column exists, etc.
+    Load the main timeline DataFrame from the Postgres table `construction_timeline_3`.
+    Rename columns in-memory to match the original code.
     """
     with engine.connect() as conn:
         df = pd.read_sql(f"SELECT * FROM {TIMELINE_TABLE}", conn)
 
-    # -- Because your original code uses specific column names, rename them:
-    # DB columns → In-app columns
+    # Adjust if your columns actually include trailing spaces or different names
     rename_map = {
         "activity": "Activity",
         "item": "Item",
@@ -80,44 +73,33 @@ def load_timeline_data() -> pd.DataFrame:
         "status": "Status",
         "workdays": "Workdays",
     }
-    # If your DB columns have trailing spaces (like "activity " / "end_date "), adjust accordingly:
-    # rename_map = {"activity ": "Activity", "end_date ": "End Date", ...}
-
-    # Apply rename if they exist
     for dbcol, appcol in rename_map.items():
         if dbcol in df.columns:
             df.rename(columns={dbcol: appcol}, inplace=True)
 
-    # Force datetime
+    # Force datetime conversions
     if "Start Date" in df.columns:
         df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce")
     if "End Date" in df.columns:
         df["End Date"] = pd.to_datetime(df["End Date"], errors="coerce")
 
-    # Ensure we have a "Progress" column in the DataFrame
+    # Ensure a Progress column if missing
     if "Progress" not in df.columns:
         df["Progress"] = 0.0
 
-    # Force "Status" to string for the Gantt logic (in your provided DB, 'status' was double precision—this code expects text).
-    df["Status"] = df["Status"].astype(str).fillna("Not Started")
-
+    # Force "Status" to string
+    df["Status"] = df.get("Status", pd.Series(["Not Started"] * len(df))).astype(str)
     # Convert "Progress" to numeric
     df["Progress"] = pd.to_numeric(df["Progress"], errors="coerce").fillna(0)
-
     return df
-
 
 def save_timeline_data(df: pd.DataFrame):
     """
     Overwrite the entire `construction_timeline_3` table with the given dataframe.
-    1) We'll rename columns back to DB format,
-    2) TRUNCATE or DELETE existing rows,
-    3) Re-insert all rows from df.
     """
-    # Create a copy so we don't modify the argument in place
     df_to_save = df.copy()
 
-    # Reverse of rename_map:
+    # Reverse-rename to match DB columns
     rename_map_back = {
         "Activity": "activity",
         "Item": "item",
@@ -135,8 +117,7 @@ def save_timeline_data(df: pd.DataFrame):
         if appcol in df_to_save.columns:
             df_to_save.rename(columns={appcol: dbcol}, inplace=True)
 
-    # Convert columns to suitable dtypes if needed
-    # - Example: ensure "status" is text, "workdays" is numeric, "progress" is double, etc.
+    # Convert data types as needed
     if "status" in df_to_save.columns:
         df_to_save["status"] = df_to_save["status"].astype(str)
     if "workdays" in df_to_save.columns:
@@ -144,36 +125,24 @@ def save_timeline_data(df: pd.DataFrame):
     if "progress" in df_to_save.columns:
         df_to_save["progress"] = pd.to_numeric(df_to_save["progress"], errors="coerce").fillna(0).astype(float)
 
-    # Now overwrite the table in Postgres. We'll do a TRUNCATE + batch insert:
     with engine.begin() as conn:
-        # 1) Clear out the table
         conn.execute(text(f"TRUNCATE TABLE {TIMELINE_TABLE}"))
-        # 2) Insert everything from the DataFrame
         df_to_save.to_sql(TIMELINE_TABLE, conn, if_exists="append", index=False)
 
 
 def alter_table_add_column(table_name: str, new_col_name: str, new_col_type: str):
-    """
-    Adds a new column to the specified Postgres table with the chosen type.
-    We interpret "string", "integer", "float", "datetime" → appropriate PostgreSQL type.
-    """
-    # Map UI choices → Postgres data types
     type_map = {
         "string": "TEXT",
         "integer": "BIGINT",
         "float": "DOUBLE PRECISION",
         "datetime": "TIMESTAMP WITHOUT TIME ZONE"
     }
-    pg_type = type_map.get(new_col_type, "TEXT")  # default to TEXT
-
+    pg_type = type_map.get(new_col_type, "TEXT")
     with engine.begin() as conn:
-        # Build and execute an ALTER TABLE statement
         sql = text(f"ALTER TABLE {table_name} ADD COLUMN {new_col_name} {pg_type}")
         conn.execute(sql)
 
-
 def alter_table_drop_column(table_name: str, col_name: str):
-    """Drops a column from the specified Postgres table."""
     with engine.begin() as conn:
         sql = text(f"ALTER TABLE {table_name} DROP COLUMN {col_name}")
         conn.execute(sql)
@@ -186,8 +155,8 @@ df_main = load_timeline_data()
 
 st.subheader("Update Task Information (Main Timeline)")
 
-# -- Sidebar for row/column management
 with st.sidebar.expander("Row & Column Management (Main Timeline)"):
+    # Delete a row by index
     st.markdown("*Delete a row by index*")
     delete_index = st.text_input("Enter row index to delete (main table)", value="")
     if st.button("Delete Row (Main)"):
@@ -198,7 +167,7 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
                 try:
                     save_timeline_data(df_main)
                     st.sidebar.success(f"Row {idx} deleted and saved.")
-                    load_timeline_data.clear()  # clear cache
+                    load_timeline_data.clear()
                     df_main = load_timeline_data()
                 except Exception as e:
                     st.sidebar.error(f"Error saving data: {e}")
@@ -207,15 +176,14 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
         else:
             st.sidebar.error("Please enter a valid integer index.")
 
+    # Add a new column
     st.markdown("*Add a new column*")
     new_col_name = st.text_input("New Column Name (main table)", value="")
     new_col_type = st.selectbox("Column Type (main table)", ["string", "integer", "float", "datetime"])
     if st.button("Add Column (Main)"):
         if new_col_name and new_col_name not in df_main.columns:
             try:
-                # 1) Alter the actual table in Postgres
                 alter_table_add_column(TIMELINE_TABLE, new_col_name, new_col_type)
-                # 2) Reload data so df_main has that column
                 load_timeline_data.clear()
                 df_main = load_timeline_data()
                 st.sidebar.success(f"Column '{new_col_name}' added and saved.")
@@ -226,6 +194,7 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
         else:
             st.sidebar.warning("Please enter a valid column name.")
 
+    # Delete a column
     st.markdown("*Delete a column*")
     col_to_delete = st.selectbox(
         "Select Column to Delete (main table)",
@@ -235,9 +204,7 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
     if st.button("Delete Column (Main)"):
         if col_to_delete and col_to_delete in df_main.columns:
             try:
-                # 1) Alter the actual table in Postgres
                 alter_table_drop_column(TIMELINE_TABLE, col_to_delete)
-                # 2) Reload
                 load_timeline_data.clear()
                 df_main = load_timeline_data()
                 st.sidebar.success(f"Column '{col_to_delete}' deleted and saved.")
@@ -249,46 +216,43 @@ with st.sidebar.expander("Row & Column Management (Main Timeline)"):
 
 # Configure columns for st.data_editor
 column_config_main = {}
+
+# Make the following columns free-text columns:
 if "Activity" in df_main.columns:
-    # Let user select from existing or type new
-    existing_activities = sorted(set(df_main["Activity"].dropna().unique()))
-    column_config_main["Activity"] = st.column_config.SelectboxColumn(
+    column_config_main["Activity"] = st.column_config.TextColumn(
         "Activity",
-        options=existing_activities,
-        help="Activity (select or type new)",
-        allow_custom_value=True
+        help="Type any activity name."
     )
 if "Item" in df_main.columns:
-    existing_items = sorted(set(df_main["Item"].dropna().unique()))
-    column_config_main["Item"] = st.column_config.SelectboxColumn(
+    column_config_main["Item"] = st.column_config.TextColumn(
         "Item",
-        options=existing_items,
-        help="Item (select or type new)",
-        allow_custom_value=True
+        help="Type any item name."
     )
 if "Task" in df_main.columns:
-    existing_tasks = sorted(set(df_main["Task"].dropna().unique()))
-    column_config_main["Task"] = st.column_config.SelectboxColumn(
+    column_config_main["Task"] = st.column_config.TextColumn(
         "Task",
-        options=existing_tasks,
-        help="Task (select or type new)",
-        allow_custom_value=True
+        help="Type any task name."
     )
 if "Room" in df_main.columns:
-    existing_rooms = sorted(set(df_main["Room"].dropna().unique()))
-    column_config_main["Room"] = st.column_config.SelectboxColumn(
+    column_config_main["Room"] = st.column_config.TextColumn(
         "Room",
-        options=existing_rooms,
-        help="Room (select or type new)",
-        allow_custom_value=True
+        help="Type any room name."
     )
+if "Location" in df_main.columns:
+    column_config_main["Location"] = st.column_config.TextColumn(
+        "Location",
+        help="Type any location."
+    )
+
+# Keep status as a dropdown with no custom values
 if "Status" in df_main.columns:
     column_config_main["Status"] = st.column_config.SelectboxColumn(
         "Status",
         options=["Finished", "In Progress", "Not Started"],
-        help="Status",
-        allow_custom_value=True
+        help="Select the status from known values only."
     )
+
+# Keep Progress as a numeric column
 if "Progress" in df_main.columns:
     column_config_main["Progress"] = st.column_config.NumberColumn(
         "Progress", min_value=0, max_value=100, step=1, help="Progress %"
@@ -301,17 +265,15 @@ edited_df_main = st.data_editor(
     num_rows="dynamic"
 )
 
-# Force "Status" to string once user is done editing
+# Force "Status" to string
 if "Status" in edited_df_main.columns:
     edited_df_main["Status"] = edited_df_main["Status"].astype(str).fillna("Not Started")
 
-# --- Auto-update Progress if status is "Finished" ---
+# Auto-update progress if status is "Finished"
 if st.button("Save Updates (Main Timeline)"):
-    # If Status is "Finished", set Progress = 100
     if "Status" in edited_df_main.columns and "Progress" in edited_df_main.columns:
         finished_mask = edited_df_main["Status"].str.lower() == "finished"
         edited_df_main.loc[finished_mask, "Progress"] = 100
-
     try:
         save_timeline_data(edited_df_main)
         st.success("Main timeline data successfully saved!")
@@ -331,16 +293,13 @@ def norm_unique(df_input: pd.DataFrame, col: str):
         return []
     return sorted(set(df_input[col].dropna().astype(str).str.lower().str.strip()))
 
-# Session-state to remember multi-select filters
 for key_ in ["activity_filter", "item_filter", "task_filter", "room_filter", "status_filter"]:
     if key_ not in st.session_state:
         st.session_state[key_] = []
 
-df_main_latest = load_timeline_data()
-# We'll filter using the already-edited data if it hasn't been saved, so let's just use 'edited_df_main'
 all_data_for_filter = edited_df_main.copy()
 
-# Build the default date range
+# Build default date range
 default_date_range = (
     all_data_for_filter["Start Date"].min() if "Start Date" in all_data_for_filter.columns and not all_data_for_filter["Start Date"].isnull().all() else datetime.today(),
     all_data_for_filter["End Date"].max() if "End Date" in all_data_for_filter.columns and not all_data_for_filter["End Date"].isnull().all() else datetime.today()
@@ -353,14 +312,12 @@ if st.sidebar.button("Clear Filters (Main)"):
     st.session_state["task_filter"] = []
     st.session_state["room_filter"] = []
     st.session_state["status_filter"] = []
-    # We'll not reset date range to keep user control
 
-# Multi-select filters
 a_opts = norm_unique(all_data_for_filter, "Activity")
 selected_activity_norm = st.sidebar.multiselect(
-    "Filter by Activity", 
+    "Filter by Activity",
     options=a_opts,
-    default=st.session_state["activity_filter"], 
+    default=st.session_state["activity_filter"],
     key="activity_filter"
 )
 
@@ -409,7 +366,6 @@ group_by_task = st.sidebar.checkbox("Group by Task", value=False)
 # =====================================================================
 df_filtered = all_data_for_filter.copy()
 
-# Force status to string
 if "Status" in df_filtered.columns:
     df_filtered["Status"] = df_filtered["Status"].astype(str).fillna("Not Started")
 
@@ -431,7 +387,6 @@ if selected_statuses:
 if not show_finished:
     df_filtered = df_filtered[~df_filtered["Status_norm"].isin(["finished"])]
 
-# Date range filter
 if "Start Date" in df_filtered.columns and "End Date" in df_filtered.columns:
     srange, erange = selected_date_range
     srange = pd.to_datetime(srange)
@@ -443,7 +398,6 @@ if "Start Date" in df_filtered.columns and "End Date" in df_filtered.columns:
 
 normcols = [c for c in df_filtered.columns if c.endswith("_norm")]
 df_filtered.drop(columns=normcols, inplace=True, errors="ignore")
-
 
 # =====================================================================
 # 5. GANTT CHART FUNCTION
@@ -468,7 +422,6 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
     if not group_cols:
         return px.scatter(title="No group columns selected for Gantt")
 
-    # aggregator
     grouped = (
         df_input
         .groupby(group_cols, dropna=False)
@@ -490,24 +443,17 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
     now = pd.Timestamp(datetime.today().date())
 
     def aggregated_status(st_list, avg_prog, start_dt, end_dt):
-        """Return a single 'display' status for the aggregated row."""
         all_lower = [str(x).lower().strip() for x in st_list if x]
         if all_lower and all(s == "finished" for s in all_lower):
             return "Finished"
         if avg_prog >= 100:
             return "Finished"
-
-        # Overdue logic
         if pd.notnull(end_dt) and end_dt < now and avg_prog < 100:
             return "Delayed"
-
-        # Some partial progress logic
         if "in progress" in all_lower and 0 < avg_prog < 100:
             return "In Progress"
         if "in progress" in all_lower and avg_prog == 0:
             return "Just Started"
-
-        # If we didn't match any of the above:
         return "Not Started"
 
     segments = []
@@ -579,7 +525,6 @@ gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status)
 # 6. KPI & CALCULATIONS
 # =====================================================================
 total_tasks = len(all_data_for_filter)
-
 if "Status" in all_data_for_filter.columns:
     all_data_for_filter["Status"] = all_data_for_filter["Status"].astype(str).fillna("Not Started")
 
@@ -678,15 +623,13 @@ ITEMS_TABLE = "cleaned_items"
 
 @st.cache_data
 def load_items_data() -> pd.DataFrame:
-    """Load or create the 'Items to Order' table from Postgres `cleaned_items`."""
+    """Load 'Items to Order' from Postgres `cleaned_items`."""
     with engine.connect() as conn:
-        # If the table doesn't exist or is empty, we can handle that by creating an empty DF:
         try:
             df_i = pd.read_sql(f"SELECT * FROM {ITEMS_TABLE}", conn)
         except:
-            # If table doesn't exist, create an empty DF with required columns
             df_i = pd.DataFrame(columns=["item","quantity","order_status","delivery_status","notes"])
-    # Rename columns to match old code references:
+
     rename_map = {
         "item": "Item",
         "quantity": "Quantity",
@@ -695,7 +638,7 @@ def load_items_data() -> pd.DataFrame:
         "notes": "Notes",
     }
     df_i.rename(columns=rename_map, inplace=True)
-    # Ensure types
+
     if "Quantity" in df_i.columns:
         df_i["Quantity"] = pd.to_numeric(df_i["Quantity"], errors="coerce").fillna(0).astype(int)
     for c in ["Item","Order Status","Delivery Status","Notes"]:
@@ -704,9 +647,8 @@ def load_items_data() -> pd.DataFrame:
     return df_i
 
 def save_items_data(df: pd.DataFrame):
-    """Overwrite the entire 'cleaned_items' table with the given DataFrame."""
+    """Overwrite 'cleaned_items' table with the given DataFrame."""
     df_save = df.copy()
-    # Reverse rename
     rename_map_back = {
         "Item": "item",
         "Quantity": "quantity",
@@ -715,8 +657,6 @@ def save_items_data(df: pd.DataFrame):
         "Notes": "notes",
     }
     df_save.rename(columns=rename_map_back, inplace=True)
-
-    # Ensure data types before writing
     df_save["quantity"] = pd.to_numeric(df_save["quantity"], errors="coerce").fillna(0).astype(int)
 
     with engine.begin() as conn:
@@ -727,7 +667,8 @@ def save_items_data(df: pd.DataFrame):
 st.header("Items to Order")
 df_items = load_items_data()
 
-# Ensure columns exist
+# Make "Item" a free text column. "Quantity" a numeric column.
+# "Order Status" and "Delivery Status" remain selectboxes. "Notes" is text.
 for needed_col in ["Item","Quantity","Order Status","Delivery Status","Notes"]:
     if needed_col not in df_items.columns:
         df_items[needed_col] = ""
@@ -735,12 +676,9 @@ for needed_col in ["Item","Quantity","Order Status","Delivery Status","Notes"]:
 items_col_config = {}
 
 if "Item" in df_items.columns:
-    existing_items_2 = sorted(set(df_items["Item"].dropna().unique()))
-    items_col_config["Item"] = st.column_config.SelectboxColumn(
+    items_col_config["Item"] = st.column_config.TextColumn(
         "Item",
-        options=existing_items_2,
-        help="Name of the item (select or type new)",
-        allow_custom_value=True
+        help="Type any item name here."
     )
 
 if "Quantity" in df_items.columns:
@@ -748,22 +686,20 @@ if "Quantity" in df_items.columns:
         "Quantity", min_value=0, step=1, help="Enter the quantity required."
     )
 
-# For "Order Status" → remove "Delayed" from possible options
+# Keep "Order Status" as a dropdown with no custom input
 if "Order Status" in df_items.columns:
     items_col_config["Order Status"] = st.column_config.SelectboxColumn(
         "Order Status",
         options=["Ordered", "Not Ordered"],
-        help="Choose if item is ordered or not.",
-        allow_custom_value=True
+        help="Choose if item is ordered or not."
     )
 
-# For "Delivery Status" → add "Delayed" as an option
+# Keep "Delivery Status" as a dropdown with no custom input
 if "Delivery Status" in df_items.columns:
     items_col_config["Delivery Status"] = st.column_config.SelectboxColumn(
         "Delivery Status",
         options=["Delivered", "Not Delivered", "Delayed"],
-        help="Delivery status of this item.",
-        allow_custom_value=True
+        help="Delivery status of this item."
     )
 
 if "Notes" in df_items.columns:
@@ -788,7 +724,6 @@ if st.button("Save Items Table"):
     except Exception as e:
         st.error(f"Error saving items table: {e}")
 
-# Download button for the items table
 csv_buffer = io.StringIO()
 edited_df_items.to_csv(csv_buffer, index=False)
 st.download_button(
