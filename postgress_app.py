@@ -4,6 +4,7 @@ import plotly.express as px
 import io
 from datetime import datetime
 import sqlalchemy
+import time  # For adding a timestamp in the query params
 
 # ------------------------------------------------------------------------------
 # Database Connection Setup
@@ -228,10 +229,13 @@ if st.button("Save Updates (Main Timeline)"):
     except Exception as e:
         st.error(f"Error saving main timeline: {e}")
 
-# --- Added Refresh Button ---
+# ------------------------------------------------------------------------------
+# REFRESH BUTTON WORKAROUND
+# ------------------------------------------------------------------------------
 if st.button("Refresh Data (Main Timeline)"):
     load_timeline_data.clear()  # clear the cache
-    st.experimental_rerun()     # re-run the app to load fresh data
+    # Use query param trick to force a re-run
+    st.experimental_set_query_params(refresh=str(time.time()))
 
 # ------------------------------------------------------------------------------
 # 5. SIDEBAR FILTERS FOR MAIN TIMELINE & GANTT CHART
