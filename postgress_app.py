@@ -287,6 +287,7 @@ default_date_range = (
     edited_df_main["End Date"].max() if "End Date" in edited_df_main.columns and not edited_df_main["End Date"].isnull().all() else datetime.today()
 )
 selected_date_range = st.sidebar.date_input("Filter Date Range", value=default_date_range, key="date_range")
+apply_date_filter = st.sidebar.button("Apply Date Filter")
 
 if st.sidebar.button("Clear Filters (Main)"):
     st.session_state["activity_filter"] = []
@@ -346,12 +347,19 @@ if not show_finished:
     df_filtered = df_filtered[~df_filtered["Status_norm"].isin(["finished"])]
 
 if "Start Date" in df_filtered.columns and "End Date" in df_filtered.columns:
-    srange, erange = selected_date_range
-    srange = pd.to_datetime(srange)
-    erange = pd.to_datetime(erange)
-    df_filtered = df_filtered[
-        (df_filtered["Start Date"] >= srange) &
-        (df_filtered["End Date"] <= erange)
+    if apply_date_filter:
+        try:
+            srange, erange = selected_date_range
+            srange = pd.to_datetime(srange)
+            erange = pd.to_datetime(erange)
+            df_filtered = df_filtered[
+                (df_filtered["Start Date"] >= srange) &
+                (df_filtered["End Date"] <= erange)
+            ]
+        except Exception as e:
+            st.error(f"Error applying date filter: {e}")
+
+
     ]
 normcols = [c for c in df_filtered.columns if c.endswith("_norm")]
 df_filtered.drop(columns=normcols, inplace=True, errors="ignore")
