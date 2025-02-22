@@ -287,7 +287,6 @@ default_date_range = (
     edited_df_main["End Date"].max() if "End Date" in edited_df_main.columns and not edited_df_main["End Date"].isnull().all() else datetime.today()
 )
 selected_date_range = st.sidebar.date_input("Filter Date Range", value=default_date_range, key="date_range")
-apply_date_filter = st.sidebar.button("Apply Date Filter")
 
 if st.sidebar.button("Clear Filters (Main)"):
     st.session_state["activity_filter"] = []
@@ -347,39 +346,26 @@ if not show_finished:
     df_filtered = df_filtered[~df_filtered["Status_norm"].isin(["finished"])]
 
 if "Start Date" in df_filtered.columns and "End Date" in df_filtered.columns:
-    if apply_date_filter:
-        try:
-            srange, erange = selected_date_range
-            srange = pd.to_datetime(srange)
-            erange = pd.to_datetime(erange)
-            df_filtered = df_filtered[
-                (df_filtered["Start Date"] >= srange) &
-                (df_filtered["End Date"] <= erange)
-            ]
-        except Exception as e:
-            st.error(f"Error applying date filter: {e}")
-
-
+    srange, erange = selected_date_range
+    srange = pd.to_datetime(srange)
+    erange = pd.to_datetime(erange)
+    df_filtered = df_filtered[
+        (df_filtered["Start Date"] >= srange) &
+        (df_filtered["End Date"] <= erange)
+    ]
 normcols = [c for c in df_filtered.columns if c.endswith("_norm")]
 df_filtered.drop(columns=normcols, inplace=True, errors="ignore")
 
 # ------------------------------------------------------------------------------
 # 6. GANTT CHART FUNCTION
 # ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------  
-# 6. GANTT CHART FUNCTION  
-# ------------------------------------------------------------------------------  
 def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
-    # Filter out rows with missing Start Date or End Date so only complete tasks appear in the Gantt chart
-    df_input = df_input.dropna(subset=["Start Date", "End Date"])
-    
     needed = ["Start Date", "End Date", "Status", "Progress"]
     missing = [c for c in needed if c not in df_input.columns]
     if missing:
         return px.scatter(title=f"Cannot build Gantt: missing {missing}")
     if df_input.empty:
-        return px.scatter(title="No tasks with valid dates to display for Gantt")
-    
+        return px.scatter(title="No data to display for Gantt")
     group_cols = ["Activity"]
     if group_by_room and "Room" in df_input.columns:
         group_cols.append("Room")
@@ -391,7 +377,6 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
         group_cols.append("Location")
     if not group_cols:
         return px.scatter(title="No group columns selected for Gantt")
-    
     grouped = (
         df_input
         .groupby(group_cols, dropna=False)
@@ -409,9 +394,7 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
         "Progress": "AvgProgress",
         "Status": "AllStatuses"
     }, inplace=True)
-    
     now = pd.Timestamp(datetime.today().date())
-    
     def aggregated_status(st_list, avg_prog, start_dt, end_dt):
         all_lower = [str(x).lower().strip() for x in st_list]
         if all(s == "finished" for s in all_lower) or avg_prog >= 100:
@@ -429,7 +412,6 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
                 return "Just Started"
             return "In Progress"
         return "Not Started"
-    
     segments = []
     for _, row in grouped.iterrows():
         label = " | ".join(str(row[g]) for g in group_cols)
@@ -489,6 +471,7 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
     fig.update_layout(xaxis_title="Timeline", showlegend=True)
     return fig
 
+gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status)
 
 # ------------------------------------------------------------------------------
 # 7. KPI & CALCULATIONS
@@ -539,10 +522,9 @@ if selected_location_norm:
     filt_summ.append("Locations: " + ", ".join(selected_location_norm))
 if selected_statuses:
     filt_summ.append("Status: " + ", ".join(selected_statuses))
-if selected_date_range and len(selected_date_range) == 2:
+if selected_date_range:
     d0, d1 = selected_date_range
     filt_summ.append(f"Date Range: {d0} to {d1}")
-
 filt_text = "; ".join(filt_summ) if filt_summ else "No filters applied."
 
 # ------------------------------------------------------------------------------
@@ -663,4 +645,3 @@ st.download_button(
     file_name="Cleaned_Items_Table.csv",
     mime="text/csv"
 )
-
