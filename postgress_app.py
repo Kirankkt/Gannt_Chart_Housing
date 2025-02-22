@@ -366,13 +366,20 @@ df_filtered.drop(columns=normcols, inplace=True, errors="ignore")
 # ------------------------------------------------------------------------------
 # 6. GANTT CHART FUNCTION
 # ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------  
+# 6. GANTT CHART FUNCTION  
+# ------------------------------------------------------------------------------  
 def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
+    # Filter out rows with missing Start Date or End Date so only complete tasks appear in the Gantt chart
+    df_input = df_input.dropna(subset=["Start Date", "End Date"])
+    
     needed = ["Start Date", "End Date", "Status", "Progress"]
     missing = [c for c in needed if c not in df_input.columns]
     if missing:
         return px.scatter(title=f"Cannot build Gantt: missing {missing}")
     if df_input.empty:
-        return px.scatter(title="No data to display for Gantt")
+        return px.scatter(title="No tasks with valid dates to display for Gantt")
+    
     group_cols = ["Activity"]
     if group_by_room and "Room" in df_input.columns:
         group_cols.append("Room")
@@ -384,6 +391,7 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
         group_cols.append("Location")
     if not group_cols:
         return px.scatter(title="No group columns selected for Gantt")
+    
     grouped = (
         df_input
         .groupby(group_cols, dropna=False)
@@ -401,7 +409,9 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
         "Progress": "AvgProgress",
         "Status": "AllStatuses"
     }, inplace=True)
+    
     now = pd.Timestamp(datetime.today().date())
+    
     def aggregated_status(st_list, avg_prog, start_dt, end_dt):
         all_lower = [str(x).lower().strip() for x in st_list]
         if all(s == "finished" for s in all_lower) or avg_prog >= 100:
@@ -419,6 +429,7 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
                 return "Just Started"
             return "In Progress"
         return "Not Started"
+    
     segments = []
     for _, row in grouped.iterrows():
         label = " | ".join(str(row[g]) for g in group_cols)
@@ -478,7 +489,6 @@ def create_gantt_chart(df_input: pd.DataFrame, color_by_status: bool = True):
     fig.update_layout(xaxis_title="Timeline", showlegend=True)
     return fig
 
-gantt_fig = create_gantt_chart(df_filtered, color_by_status=color_by_status)
 
 # ------------------------------------------------------------------------------
 # 7. KPI & CALCULATIONS
