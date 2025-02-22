@@ -529,9 +529,10 @@ if selected_location_norm:
     filt_summ.append("Locations: " + ", ".join(selected_location_norm))
 if selected_statuses:
     filt_summ.append("Status: " + ", ".join(selected_statuses))
-if selected_date_range:
+if selected_date_range and len(selected_date_range) == 2:
     d0, d1 = selected_date_range
     filt_summ.append(f"Date Range: {d0} to {d1}")
+
 filt_text = "; ".join(filt_summ) if filt_summ else "No filters applied."
 
 # ------------------------------------------------------------------------------
