@@ -360,7 +360,6 @@ if "Start Date" in df_filtered.columns and "End Date" in df_filtered.columns:
             st.error(f"Error applying date filter: {e}")
 
 
-    ]
 normcols = [c for c in df_filtered.columns if c.endswith("_norm")]
 df_filtered.drop(columns=normcols, inplace=True, errors="ignore")
 
